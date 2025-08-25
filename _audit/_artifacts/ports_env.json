@@ -1,0 +1,50 @@
+{
+  "BACKEND_PORT": {
+    "value": "8080",
+    "file": "backend/main.py:700, run_all.py:156,186,204",
+    "usage": "Backend/Orchestrator",
+    "match": "YES"
+  },
+  "FRONTEND_PORT": {
+    "value": "8001",
+    "file": "run_all.py:221,230,238",
+    "usage": "Frontend/Orchestrator",
+    "match": "YES"
+  },
+  "BACKEND_BASE": {
+    "value": "http://localhost:8080",
+    "file": "frontend/index.html:1099",
+    "usage": "Frontend",
+    "match": "YES"
+  },
+  "QDRANT_MAIL_HOST": {
+    "value": "127.0.0.1",
+    "file": "backend/main.py:87, run_all.py:73,98,104,109,117,122",
+    "usage": "Backend/Orchestrator",
+    "match": "YES"
+  },
+  "QDRANT_MAIL_PORT": {
+    "value": "6333",
+    "file": "backend/main.py:88",
+    "usage": "Backend",
+    "match": "YES"
+  },
+  "QDRANT_DOC_HOST": {
+    "value": "127.0.0.1",
+    "file": "backend/main.py:90",
+    "usage": "Backend",
+    "match": "YES"
+  },
+  "QDRANT_DOC_PORT": {
+    "value": "6333",
+    "file": "backend/main.py:91",
+    "usage": "Backend",
+    "match": "YES"
+  },
+  "OLLAMA_URL": {
+    "value": "http://127.0.0.1:11434/api/chat",
+    "file": "backend/main.py:72, run_all.py:113,126",
+    "usage": "Backend/Orchestrator",
+    "match": "YES"
+  }
+}

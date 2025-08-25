@@ -1,0 +1,7 @@
+From: test@example.com
+To: user@example.com
+Subject: Test Mail for Opening Function
+Date: Thu, 22 Aug 2024 13:00:00 +0000
+Content-Type: text/plain; charset=UTF-8
+
+This is a test email message for testing the mail opening functionality.

@@ -1,0 +1,42 @@
+[
+  {
+    "service": "Qdrant Vector DB",
+    "type": "Mail Storage",
+    "host_port": "127.0.0.1:6333",
+    "file_line": "backend/main.py:132",
+    "usage": "Vector search",
+    "config": "MAIL_QDRANT_HOST/PORT"
+  },
+  {
+    "service": "Qdrant Vector DB",
+    "type": "Doc Storage",
+    "host_port": "127.0.0.1:6333",
+    "file_line": "backend/main.py:133",
+    "usage": "Vector search",
+    "config": "DOC_QDRANT_HOST/PORT"
+  },
+  {
+    "service": "Ollama LLM",
+    "type": "AI Model",
+    "host_port": "127.0.0.1:11434",
+    "file_line": "backend/main.py:72",
+    "usage": "Text generation",
+    "config": "OLLAMA_API_URL"
+  },
+  {
+    "service": "Outlook COM",
+    "type": "Mail Client",
+    "host_port": "N/A",
+    "file_line": "backend/main.py:524,567",
+    "usage": "Open MAPI mails",
+    "config": "win32com.client"
+  },
+  {
+    "service": "File System",
+    "type": "OS Service",
+    "host_port": "N/A",
+    "file_line": "backend/main.py:479,486,511",
+    "usage": "Open files/docs",
+    "config": "os.startfile"
+  }
+]

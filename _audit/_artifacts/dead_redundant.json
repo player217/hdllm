@@ -1,0 +1,30 @@
+[
+  {
+    "type": "Unused Route",
+    "item": "GET /",
+    "file_line": "backend/main.py:413",
+    "reason": "Frontend에서 호출하지 않음",
+    "recommendation": "API 정보용으로 유지"
+  },
+  {
+    "type": "Unused Route",
+    "item": "GET /favicon.ico",
+    "file_line": "backend/main.py:430",
+    "reason": "Frontend에서 호출하지 않음",
+    "recommendation": "브라우저 요청용으로 유지"
+  },
+  {
+    "type": "Unused Route",
+    "item": "GET /health",
+    "file_line": "backend/main.py:435",
+    "reason": "Frontend에서 호출하지 않음",
+    "recommendation": "모니터링용으로 유지"
+  },
+  {
+    "type": "Redundant Route",
+    "item": "POST /open-mail vs GET /open_mail",
+    "file_line": "backend/main.py:541 vs 499",
+    "reason": "유사한 기능의 중복 경로",
+    "recommendation": "하나로 통합 고려"
+  }
+]

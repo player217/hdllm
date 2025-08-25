@@ -1,0 +1,30 @@
+[
+  {
+    "method": "GET",
+    "final_url": "http://localhost:8080/status",
+    "file_line": "frontend/index.html:1770",
+    "snippet": "fetch(`${BACKEND_BASE}/status`",
+    "match_route": "YES"
+  },
+  {
+    "method": "POST",
+    "final_url": "http://localhost:8080/ask",
+    "file_line": "frontend/index.html:2022",
+    "snippet": "fetch(`${BACKEND_BASE}/ask`, {method: \"POST\"",
+    "match_route": "YES"
+  },
+  {
+    "method": "GET",
+    "final_url": "http://localhost:8080/open_mail",
+    "file_line": "frontend/index.html:2258",
+    "snippet": "fetch(`${BACKEND_BASE}/open_mail?link_key=...",
+    "match_route": "YES"
+  },
+  {
+    "method": "POST",
+    "final_url": "http://localhost:8080/open_file",
+    "file_line": "frontend/index.html:2286",
+    "snippet": "fetch(`${BACKEND_BASE}/open_file`, {method: \"POST\"",
+    "match_route": "YES"
+  }
+]

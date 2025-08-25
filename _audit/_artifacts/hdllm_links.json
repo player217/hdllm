@@ -1,0 +1,26 @@
+[
+  {
+    "schema": "outlook://",
+    "target_type": "MAPI Mail",
+    "build_rule": "f\"outlook://{item_id}\"",
+    "file_line": "src/HDLLM.py:1413",
+    "snippet": "\"link\": f\"outlook://{item_id}\"",
+    "normalized": "YES"
+  },
+  {
+    "schema": "file:///",
+    "target_type": "MSG File",
+    "build_rule": "\"file:///\" + str(Path(item_id).resolve()).replace(\"\\\", \"/\")",
+    "file_line": "src/HDLLM.py:1502",
+    "snippet": "\"link\": \"file:///\" + str(Path(item_id).resolve())...",
+    "normalized": "YES"
+  },
+  {
+    "schema": "file:///",
+    "target_type": "EML File",
+    "build_rule": "\"file:///\" + str(Path(item_id).resolve()).replace(\"\\\", \"/\")",
+    "file_line": "src/HDLLM.py:1522",
+    "snippet": "\"link\": \"file:///\" + str(Path(item_id).resolve())...",
+    "normalized": "YES"
+  }
+]

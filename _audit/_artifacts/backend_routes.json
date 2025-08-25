@@ -1,0 +1,58 @@
+[
+  {
+    "method": "GET",
+    "path": "/",
+    "handler": "root",
+    "file_line": "backend/main.py:413",
+    "notes": "API 정보"
+  },
+  {
+    "method": "GET",
+    "path": "/favicon.ico",
+    "handler": "favicon",
+    "file_line": "backend/main.py:430",
+    "notes": "204 No Content"
+  },
+  {
+    "method": "GET",
+    "path": "/health",
+    "handler": "health_check",
+    "file_line": "backend/main.py:435",
+    "notes": "헬스체크"
+  },
+  {
+    "method": "GET",
+    "path": "/status",
+    "handler": "status",
+    "file_line": "backend/main.py:439",
+    "notes": "외부 서비스 상태"
+  },
+  {
+    "method": "POST",
+    "path": "/open_file",
+    "handler": "open_file",
+    "file_line": "backend/main.py:456",
+    "notes": "부서 문서 파일 열기"
+  },
+  {
+    "method": "GET",
+    "path": "/open_mail",
+    "handler": "open_mail",
+    "file_line": "backend/main.py:499",
+    "notes": "메일/파일 열기 (GET)"
+  },
+  {
+    "method": "POST",
+    "path": "/open-mail",
+    "handler": "open_mail_post",
+    "file_line": "backend/main.py:541",
+    "notes": "메일 열기 (POST)"
+  },
+  {
+    "method": "POST",
+    "path": "/ask",
+    "handler": "ask",
+    "file_line": "backend/main.py:578",
+    "notes": "RAG 질문 답변 스트리밍"
+  }
+]

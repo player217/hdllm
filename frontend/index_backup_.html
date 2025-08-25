@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>MENTAT-1o - 선각기술부 GPT</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Core colors */
+            --bright-purple: #8e44ad;
+            --deep-purple: #4527a0;
+            --user-bubble-dark-rgba: rgba(94, 53, 177, 0.4);
+            --deep-black: #111111;
+            --server-name-grey: #555555;
+            --server-name-grey-dark: #aaaaaa;
+            --light-grey: #f1f1f1;
+            --medium-grey: #ccc;
+            --dark-grey: #333333;
+            --charcoal: #212121;
+            --almost-black: #0a0a0a;
+            --white: #ffffff;
+            --green-good: #4CAF50;
+            --red-bad: #F44336;
+            --input-container-bg-light: var(--light-grey);
+            --input-container-bg-dark: var(--dark-grey);
+
+            /* Theme tokens */
+            --bg-main: var(--white);
+            --bg-side: #e9e9e9;
+            --text-color: var(--deep-black);
+            --bubble-user: #ede7f6;
+            --bubble-bot: var(--light-grey);
+            --input-bg: transparent;
+            --input-border: var(--medium-grey);
+            --input-container-bg: var(--input-container-bg-light);
+            --button-bg: var(--bright-purple);
+            --button-text: var(--white);
+            --button-border: none;
+            --toggle-bg: var(--deep-black);
+            --toggle-text: var(--white);
+            --status-label: var(--deep-black);
+            --status-name: var(--server-name-grey);
+            --status-good: var(--green-good);
+            --status-bad: var(--red-bad);
+            --menu-bg: #f8f8f8;
+            --menu-text: var(--dark-grey);
+            --menu-border: #ddd;
+            --header-border: rgba(0,0,0,0.05);
+            --disabled-bg: #e0e0e0;
+            --disabled-text: #aaaaaa;
+            --stop-border: var(--bright-purple);
+            --stop-color: var(--bright-purple);
+            --stop-bg: transparent;
+            --msg-label-text: var(--deep-black);
+        }
+        body.dark {
+            --bg-main: var(--almost-black);
+            --bg-side: var(--charcoal);
+            --text-color: var(--white);
+            --bubble-user: var(--user-bubble-dark-rgba);
+            --bubble-bot: var(--dark-grey);
+            --input-bg: transparent;
+            --input-border: #444;
+            --input-container-bg: var(--input-container-bg-dark);
+            --button-bg: var(--bright-purple);
+            --button-text: var(--white);
+            --toggle-bg: var(--white);
+            --toggle-text: var(--deep-black);
+            --status-label: var(--white);
+            --status-name: var(--server-name-grey-dark);
+            --status-good: #81C784;
+            --status-bad: #E57373;
+            --menu-bg: var(--dark-grey);
+            --menu-text: #eee;
+            --menu-border: #555;
+            --header-border: rgba(255,255,255,0.1);
+            --disabled-bg: #424242;
+            --disabled-text: #757575;
+            --stop-border: var(--bright-purple);
+            --stop-color: var(--bright-purple);
+            --stop-bg: transparent;
+            --msg-label-text: var(--white);
+        }
+
+        * { box-sizing: border-box; }
+        body { margin:0; background:var(--bg-side); font-family:'Inter','Segoe UI',sans-serif; display:flex; justify-content:center; color:var(--text-color); transition: background-color .3s,color .3s; }
+        .container { width:100%; max-width:900px; min-height:100vh; background:var(--bg-main); display:flex; flex-direction:column; }
+        #header { padding:15px 25px; display:flex; justify-content:space-between; align-items:center; position:sticky; top:0; background:inherit; z-index:20; border-bottom:1px solid var(--header-border); }
+        .header-left { display:flex; flex-direction:column; align-items:flex-start; }
+        .site-subtitle { font-size:.95rem; font-weight:600; margin-bottom:4px; background-image:linear-gradient(90deg,#26c6da,#007bff,#9c27b0,#f50057,#ff9800); -webkit-background-clip:text; background-clip:text; color:transparent; }
+        .site-title { font-size:2rem; font-weight:700; color:var(--bright-purple); line-height:1; letter-spacing:1.5px; }
+        .header-right { display:flex; align-items:flex-start; justify-content:flex-end; gap:15px; padding-top:5px; }
+        #server-status { font-size:.8rem; display:flex; align-items:center; gap:10px; padding:5px 0; }
+        .status-label { font-weight:600; color:var(--status-label); margin-right:5px; }
+        .server-item { display:flex; gap:5px; align-items:center; }
+        .server-name { color:var(--status-name); }
+        .status-good { color:var(--status-good); } .status-bad { color:var(--status-bad); } .status-checking { color:#aaa; font-style:italic; }
+        #toggle-dark { font-size:.9rem; padding:5px 8px; border:none; border-radius:6px; cursor:pointer; font-weight:800; background:var(--toggle-bg); color:var(--toggle-text); transition:background-color .3s,color .3s; min-width:90px; text-align:center; flex-shrink:0; margin-top:2px; }
+        .menu-container { position:relative; flex-shrink:0; margin-top:-3px; }
+        #menu-button { background:none; border:none; font-size:1.8rem; cursor:pointer; color:inherit; padding:5px; line-height:1; }
+        #menu-dropdown { display:none; position:absolute; top:100%; right:0; background:var(--menu-bg); border:1px solid var(--menu-border); border-radius:8px; z-index:30; width:220px; overflow:hidden; }
+        #menu-dropdown.show { display:block; }
+        #menu-dropdown a { display:block; padding:12px 18px; text-decoration:none; color:var(--menu-text); font-size:.95rem; white-space:nowrap; transition:background-color .2s; }
+        #menu-dropdown a:hover { background-color:rgba(128,128,128,.1); }
+
+        #chat-container { flex:1; padding:24px 25px 100px; overflow-y:auto; }
+        .msg-wrapper { display:flex; flex-direction:column; margin-bottom:20px; opacity:0; animation:fadeIn .5s ease forwards; }
+        .msg-wrapper.user { align-items:flex-end; } .msg-wrapper.bot { align-items:flex-start; }
+        .msg-label { font-size:.75rem; margin-bottom:5px; color:var(--msg-label-text); font-weight:600; }
+        .message { max-width:85%; padding:14px 20px; border-radius:18px; white-space:pre-wrap; line-height:1.6; word-break:break-word; color:var(--text-color); }
+        .msg-wrapper.user .message { background:var(--bubble-user); border-bottom-right-radius:6px; color:var(--deep-black); }
+        body.dark .msg-wrapper.user .message { color:var(--white); background:var(--bubble-user); }
+        .msg-wrapper.bot .message { background:var(--bubble-bot); border-bottom-left-radius:6px; }
+
+        /* References */
+        .references-container { margin-top:15px; width:100%;}
+        .references-container table { width:100%; border-collapse:collapse; font-size:.85rem; word-break:break-all; }
+        .references-container th, .references-container td { border:1px solid var(--input-border); padding:8px 10px; text-align:left; vertical-align:middle; }
+        .references-container th { background:var(--bubble-bot); font-weight:600; }
+        .references-container .col-open { width:15%; text-align:center; }
+        .references-container button { font-family:inherit; font-size:.8rem; padding:4px 10px; background:var(--bright-purple); color:var(--white); border:none; border-radius:4px; cursor:pointer; transition:opacity .2s; }
+        .references-container button:hover { opacity:.85; }
+
+        .loading .message span { display:inline-block; opacity:0; animation:blink 1.4s infinite both; }
+        @keyframes blink { 0% {opacity:.2;} 20% {opacity:1;} 100% {opacity:.2;} }
+
+        /* Input area */
+        #input-container { position:sticky; bottom:0; padding:10px 15px; background:var(--input-container-bg); border-top:1px solid var(--header-border); display:flex; flex-direction:column; gap:8px; z-index:10; }
+        .input-toolbar { display:flex; align-items:center; gap:10px; justify-content:space-between; }
+        .toolbar-left { display:flex; align-items:center; gap:8px; }
+        .toolbar-hint { font-size:.8rem; opacity:.8; }
+
+        /* Professional segmented toggle */
+        .segmented {
+            display:inline-flex; border:1px solid var(--input-border); border-radius:10px; overflow:hidden; background:var(--bg-main);
+            box-shadow: 0 0 0 1px rgba(0,0,0,0.02) inset;
+        }
+        .segmented input { display:none; }
+        .segmented label {
+            padding:6px 12px; cursor:pointer; user-select:none; font-weight:600; font-size:.85rem;
+            transition: background .15s, color .15s;
+        }
+        .segmented label:hover { background:rgba(142,68,173,0.08); }
+        .segmented input:checked + label {
+            background:var(--bright-purple); color:var(--white);
+        }
+        .segmented .seg-icon { font-size:.9em; opacity:.9; margin-right:6px; }
+
+        /* Text input & submit */
+        .input-row { display:flex; gap:10px; align-items:center; }
+        #question { flex:1; padding:14px 18px; border:1px solid var(--input-border); border-radius:12px; font-size:1rem; font-family:inherit; background:var(--input-bg); color:var(--text-color); resize:none; line-height:1.5; min-height:76px; height:76px; max-height:150px; overflow-y:auto; }
+        #question:focus { outline:none; border-color:var(--bright-purple); box-shadow:0 0 0 2px rgba(142,68,173,0.2); }
+        #submit-btn { height:48px; width:48px; padding:0; border-radius:50%; background:var(--button-bg); border:var(--button-border); color:var(--button-text); font-size:1.4rem; cursor:pointer; transition: all .2s ease; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+        #submit-btn:hover:not(:disabled):not(.stop) { opacity:.85; }
+        #submit-btn.stop { background:var(--stop-bg); color:var(--stop-color); border:2px solid var(--stop-border); font-size:1.5rem; }
+        #submit-btn.stop:hover { opacity:.8; background:rgba(142,68,173,.1); }
+        #submit-btn:disabled:not(.stop) { background:var(--disabled-bg); color:var(--disabled-text); cursor:wait; opacity:.7; border:none; }
+
+        @keyframes fadeIn { from { opacity:0; transform:translateY(10px);} to { opacity:1; transform:translateY(0);} }
+        #chat-container::-webkit-scrollbar { width:6px; }
+        #chat-container::-webkit-scrollbar-track { background:transparent; }
+        #chat-container::-webkit-scrollbar-thumb { background-color:rgba(128,128,128,.3); border-radius:3px; }
+        body.dark #chat-container::-webkit-scrollbar-thumb { background-color:rgba(255,255,255,.2); }
+
+        @media (max-width:700px){
+            #server-status { display:none; }
+            #question { height:60px; min-height:60px; }
+            #submit-btn, #submit-btn.stop { height:44px; width:44px; font-size:1.3rem; }
+            .toolbar-hint { display:none; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="header">
+            <div class="header-left">
+                <div class="site-subtitle">■ HD현대미포 선각기술부</div>
+                <div class="site-title">MENTAT-1o</div>
+            </div>
+            <div class="header-right">
+                <div id="server-status">
+                    <span class="status-label">Server Status:</span>
+                    <span class="server-item"><span class="server-name">OLLAMA</span> <span id="status-ollama"></span></span>
+                    <span class="server-item"><span class="server-name">FastAPI</span> <span id="status-fastAPI"></span></span>
+                    <span class="server-item"><span class="server-name">Qdrant</span> <span id="status-qdrant"></span></span>
+                </div>
+                <button id="toggle-dark" title="테마 전환">다크모드</button>
+                <div class="menu-container">
+                    <button id="menu-button" aria-label="메뉴 열기">&#9776;</button>
+                    <div id="menu-dropdown">
+                        <a href="#" id="open-folder-link">선각기술부 부서폴더 열기</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="chat-container"></div>
+
+        <!-- 입력 영역 -->
+        <div id="input-container">
+            <!-- 🔹 토글 툴바(전송 버튼 위쪽) -->
+            <div class="input-toolbar">
+                <div class="toolbar-left" title="질의 대상을 선택하세요">
+                    <div class="segmented" role="group" aria-label="질의 대상">
+                        <input type="radio" name="source" id="src-mail" value="mail">
+                        <label for="src-mail"><span class="seg-icon">📫</span>메일</label>
+                        <input type="radio" name="source" id="src-doc" value="doc">
+                        <label for="src-doc"><span class="seg-icon">📄</span>문서</label>
+                    </div>
+                </div>
+                <div class="toolbar-hint">Shift+Enter 줄바꿈 • Enter 전송</div>
+            </div>
+
+            <div class="input-row">
+                <textarea id="question" placeholder="질문을 입력하세요…" rows="1"></textarea>
+                <button id="submit-btn" title="질문 전송">&#10148;</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const questionInput = document.getElementById('question');
+        const chatContainer = document.getElementById('chat-container');
+        const submitBtn = document.getElementById('submit-btn');
+        const darkModeToggle = document.getElementById('toggle-dark');
+        const menuButton = document.getElementById('menu-button');
+        const menuDropdown = document.getElementById('menu-dropdown');
+        const openFolderLink = document.getElementById('open-folder-link');
+        const statusOllama = document.getElementById('status-ollama');
+        const statusFastAPI = document.getElementById('status-fastAPI');
+        const statusQdrant = document.getElementById('status-qdrant');
+
+        // 🔹 세그먼트 토글 초기화 & 저장
+        const srcMail = document.getElementById('src-mail');
+        const srcDoc  = document.getElementById('src-doc');
+        (function initSourceSegment(){
+            const saved = localStorage.getItem('querySource');
+            if(saved === 'doc'){ srcDoc.checked = true; }
+            else { srcMail.checked = true; localStorage.setItem('querySource','mail'); }
+            [srcMail, srcDoc].forEach(el => el.addEventListener('change', () => {
+                const val = srcDoc.checked ? 'doc' : 'mail';
+                localStorage.setItem('querySource', val);
+            }));
+        })();
+
+        let abortController = null;
+
+        function applyDarkModePreference() {
+            const isDark = localStorage.getItem('darkMode') === 'true';
+            document.body.classList.toggle('dark', isDark);
+            darkModeToggle.textContent = isDark ? '라이트모드' : '다크모드';
+        }
+        darkModeToggle.addEventListener('click', () => {
+            const isDark = document.body.classList.toggle('dark');
+            localStorage.setItem('darkMode', isDark);
+            darkModeToggle.textContent = isDark ? '라이트모드' : '다크모드';
+        });
+        menuButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            menuDropdown.classList.toggle('show');
+        });
+        document.addEventListener('click', (e) => {
+            if(!menuButton.contains(e.target) && !menuDropdown.contains(e.target)){
+                menuDropdown.classList.remove('show');
+            }
+        });
+        openFolderLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            menuDropdown.classList.remove('show');
+            try { window.open('file://///203.228.239.6/선체생산'); }
+            catch (err) { console.error("Failed folder link:", err); appendMessage("Error opening folder.", 'bot'); }
+        });
+
+        function resizeTextarea() {
+            const initialHeight = 76;
+            questionInput.style.height = 'auto';
+            const newHeight = Math.max(initialHeight, Math.min(questionInput.scrollHeight, 150));
+            questionInput.style.height = newHeight + 'px';
+        }
+        questionInput.addEventListener('input', resizeTextarea);
+
+        function openReference(linkKey) {
+            fetch(`http://localhost:8080/open_mail?link_key=${encodeURIComponent(linkKey)}`)
+                .then(r => { if (!r.ok && r.status !== 204) alert("메일을 열 수 없습니다 (서버 오류)"); })
+                .catch(_ => alert("백엔드 연결에 실패했습니다."));
+        }
+
+        // ── 스트리밍 전송 (source 포함) ───────────────────────────────
+        async function sendQuestion() {
+            const question = questionInput.value.trim();
+            if (!question || submitBtn.classList.contains('stop')) return;
+
+            const source = document.getElementById('src-doc').checked ? 'doc' : 'mail';
+
+            appendMessage(question, 'user');
+            questionInput.value = '';
+            resizeTextarea();
+            questionInput.focus();
+
+            const botMessageWrapper = appendMessage('<span>.</span><span>.</span><span>.</span>', 'bot', { isLoading: true });
+
+            submitBtn.innerHTML = '&#9632;';
+            submitBtn.disabled = false;
+            submitBtn.classList.add('stop');
+            abortController = new AbortController();
+
+            try {
+                const res = await fetch('http://localhost:8080/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question, source }), // ← 중요
+                    signal: abortController.signal
+                });
+
+                if (!res.ok) {
+                    let errorMsg = `HTTP error! Status: ${res.status}`;
+                    try { const err = await res.json(); errorMsg = err.detail || err.message || errorMsg; } catch(_){}
+                    throw new Error(errorMsg);
+                }
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let isFirstChunk = true;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+                        const data = JSON.parse(line);
+
+                        if (data.answer_chunk) {
+                            if (isFirstChunk) {
+                                botMessageWrapper.querySelector('.message').innerHTML = '';
+                                botMessageWrapper.classList.remove('loading');
+                                isFirstChunk = false;
+                            }
+                            botMessageWrapper.querySelector('.message').innerHTML +=
+                                data.answer_chunk.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                        }
+                        if (data.references) {
+                            appendReferences(botMessageWrapper, data.references);
+                        }
+                    }
+                }
+            } catch (error) {
+                botMessageWrapper.remove();
+                if (error.name === 'AbortError') appendMessage('요청이 취소되었습니다.', 'bot');
+                else { console.error('Fetch Error:', error); appendMessage(`오류: ${error.message}`, 'bot'); }
+            } finally {
+                submitBtn.innerHTML = '&#10148;';
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('stop');
+                abortController = null;
+            }
+        }
+
+        function stopRequest(){ if (abortController) abortController.abort(); }
+
+        function appendMessage(text, type, options = {}) {
+            const { isLoading = false } = options;
+            const wrapper = document.createElement('div');
+            wrapper.className = `msg-wrapper ${type}${isLoading ? ' loading' : ''}`;
+            const sanitizedText = isLoading ? text : text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            wrapper.innerHTML = `<div class="msg-label">${type === 'user' ? 'Question' : (isLoading ? 'Generating' : 'Answer')}</div><div class="message">${sanitizedText}</div>`;
+            chatContainer.appendChild(wrapper);
+            setTimeout(() => wrapper.scrollIntoView({ behavior:'smooth', block:'end' }), 50);
+            return wrapper;
+        }
+
+        function appendReferences(messageWrapper, references) {
+            if (!references || references.length === 0) return;
+            const refContainer = document.createElement('div');
+            refContainer.className = 'references-container';
+            let tableHTML = `
+                <div class="msg-label">참고자료</div>
+                <table>
+                    <thead><tr><th>제목</th><th>날짜</th><th>발신자</th><th class="col-open">열기</th></tr></thead>
+                    <tbody>`;
+            const escape = (s) => s ? s.replace(/</g,"&lt;").replace(/>/g,"&gt;") : '';
+            for (const ref of references) {
+                const safeLinkKey = ref.link ? ref.link.replace(/'/g, "\\'") : '';
+                tableHTML += `
+                    <tr>
+                        <td>${escape(ref.title)}</td>
+                        <td>${escape(ref.date)}</td>
+                        <td><b>${escape(ref.sender)}</b></td>
+                        <td class="col-open"><button onclick="openReference('${safeLinkKey}')">열기</button></td>
+                    </tr>`;
+            }
+            tableHTML += `</tbody></table>`;
+            refContainer.innerHTML = tableHTML;
+            messageWrapper.appendChild(refContainer);
+        }
+
+        submitBtn.addEventListener('click', () => {
+            if (submitBtn.classList.contains('stop')) stopRequest();
+            else sendQuestion();
+        });
+
+        questionInput.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (!submitBtn.classList.contains('stop')) sendQuestion();
+            }
+        });
+
+        async function checkServerStatus(url, element, name) {
+            element.textContent = '';
+            element.className = 'status-checking';
+            const controller = new AbortController();
+            const tid = setTimeout(() => controller.abort(), 5000);
+            try {
+                const res = await fetch(url, { mode: (name === 'FastAPI' ? 'cors' : 'no-cors'), signal: controller.signal });
+                clearTimeout(tid);
+                if (name !== 'FastAPI' || res.ok) {
+                    element.textContent = 'Good';
+                    element.className = 'status-good';
+                } else { throw new Error(`Status check fail ${name}`); }
+            } catch (e) {
+                clearTimeout(tid);
+                element.textContent = 'Bad';
+                element.className = 'status-bad';
+            }
+        }
+        function runStatusChecks() {
+            checkServerStatus('http://10.150.104.21:11434/', statusOllama, 'OLLAMA');
+            checkServerStatus('http://localhost:8080/health', statusFastAPI, 'FastAPI');
+            checkServerStatus('http://localhost:6333/', statusQdrant, 'Qdrant');
+        }
+
+        applyDarkModePreference();
+        runStatusChecks();
+        setInterval(runStatusChecks, 60000);
+        resizeTextarea();
+    </script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Status Polling Fix Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .active { background: #4CAF50; color: white; }
+        .paused { background: #FF9800; color: white; }
+        .log { background: #f0f0f0; padding: 10px; margin-top: 20px; height: 300px; overflow-y: auto; }
+        .log-entry { margin: 5px 0; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Status Polling Test</h1>
+    
+    <div id="polling-status" class="status active">Polling: ACTIVE</div>
+    <div id="streaming-status" class="status">Streaming: IDLE</div>
+    
+    <button onclick="simulateStreaming()">Simulate Streaming (10s)</button>
+    <button onclick="resetTest()">Reset Test</button>
+    
+    <div class="log" id="log">
+        <div class="log-entry">Test initialized...</div>
+    </div>
+
+    <script>
+        let statusTimer = null;
+        let isStreaming = false;
+        let pollCount = 0;
+        
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        function pauseStatusPoll() {
+            if (statusTimer) {
+                clearInterval(statusTimer);
+                statusTimer = null;
+                document.getElementById('polling-status').className = 'status paused';
+                document.getElementById('polling-status').textContent = 'Polling: PAUSED';
+                log('✋ Status polling PAUSED');
+            }
+        }
+        
+        function resumeStatusPoll() {
+            if (!statusTimer) {
+                statusTimer = setInterval(checkServerStatus, 2000); // 2s for testing
+                document.getElementById('polling-status').className = 'status active';
+                document.getElementById('polling-status').textContent = 'Polling: ACTIVE';
+                log('▶️ Status polling RESUMED');
+            }
+        }
+        
+        function checkServerStatus() {
+            if (isStreaming) {
+                log('⚠️ Status check SKIPPED (streaming in progress)');
+                return;
+            }
+            pollCount++;
+            log(`📊 Status check #${pollCount} executed`);
+        }
+        
+        async function simulateStreaming() {
+            if (isStreaming) {
+                log('❌ Already streaming!');
+                return;
+            }
+            
+            log('🚀 Starting simulated streaming...');
+            isStreaming = true;
+            pauseStatusPoll();
+            
+            document.getElementById('streaming-status').className = 'status active';
+            document.getElementById('streaming-status').textContent = 'Streaming: ACTIVE';
+            
+            // Simulate 10 second streaming
+            for (let i = 1; i <= 10; i++) {
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                log(`📝 Streaming chunk ${i}/10 received`);
+            }
+            
+            log('✅ Streaming completed');
+            resumeStatusPoll();
+            isStreaming = false;
+            
+            document.getElementById('streaming-status').className = 'status';
+            document.getElementById('streaming-status').textContent = 'Streaming: IDLE';
+        }
+        
+        function resetTest() {
+            if (statusTimer) clearInterval(statusTimer);
+            statusTimer = null;
+            isStreaming = false;
+            pollCount = 0;
+            document.getElementById('log').innerHTML = '<div class="log-entry">Test reset...</div>';
+            log('🔄 Test environment reset');
+            resumeStatusPoll();
+        }
+        
+        // Start polling on load
+        document.addEventListener('DOMContentLoaded', function() {
+            log('✅ Test page loaded');
+            statusTimer = setInterval(checkServerStatus, 2000); // 2s interval for testing
+            log('▶️ Status polling started (2s interval for testing)');
+        });
+    </script>
+</body>
+</html>

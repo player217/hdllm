@@ -1,0 +1,23 @@
+[
+  {
+    "process": "uvicorn (Backend)",
+    "port": "8080",
+    "cmd": "uvicorn main:app --host 0.0.0.0 --port 8080",
+    "file_line": "run_all.py:153",
+    "encoding_issues": "FIXED"
+  },
+  {
+    "process": "http.server (Frontend)",
+    "port": "8001",
+    "cmd": "python -m http.server 8001",
+    "file_line": "run_all.py:221",
+    "encoding_issues": "N/A"
+  },
+  {
+    "process": "subprocess.Popen",
+    "port": "N/A",
+    "cmd": "Process management",
+    "file_line": "run_all.py:169,225",
+    "encoding_issues": "N/A"
+  }
+]

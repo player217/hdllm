@@ -1,0 +1,14 @@
+{
+    "01_sungak_parser": {
+        "display_name": "01_선각계열회의록",
+        "entry_point": "load_documents",
+        "allowed_extensions": [".xlsx", ".xlsm"],
+        "requires_chunking": false
+    },
+    "02_default_parser": {
+        "display_name": "02_일반문서 (Tika)",
+        "entry_point": "load_documents",
+        "allowed_extensions": [".pdf", ".docx", ".txt", ".pptx", ".hwp"],
+        "requires_chunking": true
+    }
+}

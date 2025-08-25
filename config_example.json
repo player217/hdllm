@@ -1,0 +1,18 @@
+{
+  "mail_qdrant_path": "C:\\Users\\lseun\\Documents\\qdrant_mail",
+  "doc_qdrant_path": "C:\\Users\\lseun\\Documents\\qdrant_document",
+  "endpoints": {
+    "mail": {
+      "qdrant_host": "127.0.0.1",
+      "qdrant_port": "6333",
+      "ollama_host": "127.0.0.1",
+      "ollama_port": "11434"
+    },
+    "doc": {
+      "qdrant_host": "10.150.104.21",
+      "qdrant_port": "6333",
+      "ollama_host": "10.150.104.21",
+      "ollama_port": "11434"
+    }
+  }
+}
