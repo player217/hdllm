@@ -6,8 +6,10 @@
 
 ## 🔐 Git Repository 정보
 - **Repository URL**: https://github.com/player217/hdllm.git
-- **Access Token**: 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
+- **Access Token**: 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
+- **Authorization Header**: `Authorization: token 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`
 - **최종 푸시**: 2025-01-26
+- **토큰 업데이트**: 2025-01-26
 
 ## 📋 목차
 1. [프로젝트 개요](#프로젝트-개요)
