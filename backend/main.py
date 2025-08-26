@@ -19,6 +19,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from qdrant_client import QdrantClient, models
 from langchain_huggingface import HuggingFaceEmbeddings
 
+# Import GPU acceleration components  
+from backend.pipeline.async_pipeline import AsyncPipeline
+from backend.common.schemas import AskRequest, IngestRequest
+from backend.common.security import cors_kwargs
+
 # --------------------------------------------------------------------------
 # 1. 로깅 설정
 # --------------------------------------------------------------------------
@@ -207,9 +212,23 @@ async def lifespan(app: FastAPI):
 
     # Phase 2A-1: ResourceManager 초기화
     try:
-        from resource_manager import get_resource_manager
-        app_state["resource_manager"] = await get_resource_manager()
-        logger.info("🎛️ ResourceManager with realistic design initialized")
+        from backend.resource_manager import get_resource_manager, ResourceManager
+        # Use ResourceManager.from_env() for GPU support
+        resource_manager = ResourceManager.from_env()
+        app_state["resource_manager"] = resource_manager
+        logger.info("🎛️ ResourceManager with GPU acceleration initialized")
+        
+        # Phase 2A-2: AsyncPipeline 초기화
+        app_state["async_pipeline"] = AsyncPipeline(
+            resource_manager=resource_manager,
+            max_concurrent=resource_manager.config.app_max_concurrency,
+            max_queue_size=resource_manager.config.queue_max
+        )
+        
+        # 큐 시스템 시작 (중요: 워커들이 작업을 처리할 수 있도록)
+        await app_state["async_pipeline"].start_queue()
+        logger.info("🚀 AsyncPipeline with TaskQueue system initialized")
+        
     except ImportError:
         logger.warning("⚠️ ResourceManager not available - using legacy approach")
     except Exception as e:
@@ -218,6 +237,14 @@ async def lifespan(app: FastAPI):
     yield
     
     logger.info("🌙 애플리케이션 종료...")
+    
+    # AsyncPipeline TaskQueue 정리
+    if "async_pipeline" in app_state:
+        try:
+            await app_state["async_pipeline"].stop_queue()
+            logger.info("✅ TaskQueue stopped gracefully")
+        except Exception as e:
+            logger.error(f"❌ TaskQueue stop failed: {e}")
     
     # ResourceManager 정리
     if "resource_manager" in app_state:
@@ -257,18 +284,8 @@ except ImportError:
     logger.error("❌ Security module not found! This is a critical security risk")
     logger.warning("⚠️ Falling back to restricted configuration")
     SECURITY_ENABLED = False
-    # Restricted fallback configuration (NOT for production)
-    CORS_CONFIG = {
-        "allow_origins": [
-            "http://localhost:3000",
-            "http://127.0.0.1:3000",
-            "http://localhost:8080", 
-            "http://127.0.0.1:8080"
-        ],
-        "allow_credentials": True,
-        "allow_methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "X-API-Key"]
-    }
+    # Use secure CORS configuration from common security module
+    CORS_CONFIG = cors_kwargs()
 
 # Phase 3 Integration - Apply comprehensive enhancements
 try:
@@ -355,34 +372,15 @@ def format_context(payload: dict) -> str:
     return f"[참고자료: 기타]\n{raw_text}"
 
 async def stream_llm_response(prompt: str, model: str, request_id: str):
-    """Ollama API를 통해 LLM 응답을 스트리밍합니다."""
-    logger.info(f"[{request_id}] 최종 답변 스트리밍 중 (모델: {model})...")
-    
-    json_data = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "당신은 HD현대미포의 한국어 AI 어시스턴트입니다. 반드시 한국어로만 응답하세요. 영어나 다른 언어는 절대 사용하지 마세요. 모든 답변은 정중하고 명확한 한국어로 작성해주세요."},
-            {"role": "user", "content": prompt}
-        ],
-        "stream": True,
-        "options": {"temperature": 0.3}  # Slight temperature for more natural Korean
-    }
+    """Stream LLM response via ResourceManager"""
+    logger.info(f"[{request_id}] LLM streaming via ResourceManager (model: {model})...")
     
     try:
-        with requests.post(
-            config.OLLAMA_API_URL, json=json_data, timeout=config.LLM_TIMEOUT, stream=True
-        ) as res:
-            res.raise_for_status()
-            # Increase buffer size to 8KB for better streaming performance
-            for chunk in res.iter_lines(chunk_size=8192):
-                if not chunk: continue
-                try:
-                    data = json.loads(chunk.decode('utf-8'))
-                    content = data.get("message", {}).get("content", "")
-                    yield content
-                    if data.get("done"): break
-                except json.JSONDecodeError:
-                    logger.warning(f"[{request_id}] JSON 청크 디코딩 실패: {chunk}")
+        rm = app_state["resource_manager"]
+        async_gen = await rm.generate_llm_response(prompt, model, stream=True)
+        async for token in async_gen:
+            # NDJSON/SSE 어떤 형식이든 상위에서 래핑하므로 여기선 텍스트만 토스
+            yield token
     except Exception as e:
         logger.error(f"[{request_id}] LLM 스트리밍 실패: {e}")
         yield "답변 생성 중 오류가 발생했습니다."
@@ -811,63 +809,210 @@ async def open_mail(request: Request):
     raise HTTPException(status_code=400, detail="entry_id 또는 display_url이 필요합니다.")
 
 @app.post("/ask")
-async def ask(
-    req: Request,
-    current_user: str = Depends(get_current_user) if SECURITY_ENABLED else None
-):
-    """사용자 질문에 대한 RAG 답변을 스트리밍합니다."""
-    request_id = str(uuid.uuid4())
-    user_info = f" (User: {current_user})" if current_user else ""
-    logger.info(f"--- RAG REQUEST START: {request_id}{user_info} ---")
+async def ask(request: AskRequest):
+    """GPU 가속 RAG 답변을 스트리밍합니다."""
+    request_id = request.request_id
+    logger.info(f"🚀 GPU RAG REQUEST START: {request_id}")
 
+    try:
+        # AsyncPipeline 사용 여부 확인
+        async_pipeline = app_state.get("async_pipeline")
+        if async_pipeline:
+            # GPU 가속 경로
+            return await ask_with_gpu_acceleration(request, async_pipeline)
+        else:
+            # 레거시 경로 (기존 코드 유지)
+            return await ask_legacy(request)
+    
+    except Exception as e:
+        logger.error(f"❌ RAG request failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+async def ask_with_gpu_acceleration(request: AskRequest, pipeline: AsyncPipeline):
+    """GPU 가속을 사용한 새로운 RAG 엔드포인트"""
+    request_id = request.request_id
+    
+    # 인사말 체크
+    if any(greet in request.query for greet in config.GREETINGS):
+        async def greeting_stream():
+            yield json.dumps({
+                "status": "completed",
+                "content": "안녕하세요! 무엇을 도와드릴까요?", 
+                "references": [],
+                "metadata": {"request_id": request_id, "gpu_accelerated": True}
+            }, ensure_ascii=False)
+        return StreamingResponse(greeting_stream(), media_type="application/x-ndjson")
+    
+    try:
+        # GPU 가속 검색 실행
+        search_result = await pipeline.run_search(
+            query=request.query,
+            source_type=request.source.value,
+            limit=request.top_k,
+            score_threshold=0.3
+        )
+        
+        results = search_result["results"]
+        metadata = search_result["metadata"]
+        
+        logger.info(f"[{request_id}] ⚡ GPU search completed: {metadata['total_time_ms']:.1f}ms on {metadata['device']}")
+        
+        if not results:
+            async def no_context_stream():
+                yield json.dumps({
+                    "status": "completed",
+                    "content": "관련 정보를 찾을 수 없습니다.",
+                    "references": [],
+                    "metadata": metadata
+                }, ensure_ascii=False)
+            return StreamingResponse(no_context_stream(), media_type="application/x-ndjson")
+        
+        # 컨텍스트 구성
+        context_parts = []
+        references = []
+        
+        for i, result in enumerate(results[:3], 1):
+            payload = result.get("payload", {})
+            text = payload.get("text", "")[:500]  # 500자 제한
+            
+            if request.source.value == "mail":
+                subject = payload.get("mail_subject", "제목 없음")
+                sender = payload.get("sender", "발송자 미상")
+                context_parts.append(f"메일 {i}: {subject}\n발송자: {sender}\n내용: {text}")
+                
+                references.append({
+                    "title": f"{subject} ({sender})",
+                    "link": payload.get("link", ""),
+                    "type": "mail"
+                })
+            else:
+                doc_name = payload.get("document_name", "문서명 미상")
+                context_parts.append(f"문서 {i}: {doc_name}\n내용: {text}")
+                
+                references.append({
+                    "title": doc_name,
+                    "link": payload.get("document_path", ""),
+                    "type": "document"
+                })
+        
+        context_text = "\n\n".join(context_parts)
+        
+        # 소스별 프롬프트 생성
+        if request.source.value == "mail":
+            system_prompt = dedent(f"""\
+                당신은 HD현대미포 선각기술부의 메일 검색 비서입니다.
+                반드시 한국어로 간결하게 답변하세요.
+                
+                질문: {request.query}
+
+                참고 메일:
+                {context_text}
+                
+                답변 규칙:
+                - 한국어로만 답변
+                - 600자 이내로 답변  
+                - 불릿 포인트 5개 이내
+                - 핵심만 간결하게
+                - 참고 메일을 바탕으로 답변
+                - 링크, URL, 이메일 주소 포함 금지""")
+        else:
+            system_prompt = dedent(f"""\
+                당신은 HD현대미포 선각기술부의 문서 검색 비서입니다.
+                반드시 한국어로 간결하게 답변하세요.
+                
+                질문: {request.query}
+
+                참고 문서:
+                {context_text}
+                
+                답변 규칙:
+                - 한국어로만 답변
+                - 600자 이내로 답변
+                - 불릿 포인트 5개 이내
+                - 핵심만 간결하게
+                - 참고 문서를 바탕으로 답변
+                - 링크, URL, 파일 경로 포함 금지""")
+        
+        # ResourceManager를 통한 LLM 응답 생성
+        resource_manager = pipeline.resource_manager
+        
+        async def gpu_accelerated_stream():
+            try:
+                # LLM 스트리밍 응답
+                response = await resource_manager.generate_llm_response(system_prompt, request.model.value)
+                
+                # 응답을 청크로 나누어 스트리밍
+                chunks = response.split()
+                for i, chunk in enumerate(chunks):
+                    if i == len(chunks) - 1:  # 마지막 청크
+                        yield json.dumps({
+                            "status": "completed",
+                            "content": chunk + " ",
+                            "references": references,
+                            "metadata": {
+                                **metadata,
+                                "request_id": request_id,
+                                "model": request.model.value,
+                                "total_results": len(results)
+                            }
+                        }, ensure_ascii=False)
+                    else:
+                        yield json.dumps({
+                            "status": "streaming", 
+                            "content": chunk + " ",
+                            "references": []
+                        }, ensure_ascii=False)
+                        
+            except Exception as e:
+                logger.error(f"❌ LLM streaming failed: {e}")
+                yield json.dumps({
+                    "status": "error",
+                    "content": "응답 생성 중 오류가 발생했습니다.",
+                    "references": references,
+                    "metadata": metadata
+                }, ensure_ascii=False)
+        
+        return StreamingResponse(gpu_accelerated_stream(), media_type="application/x-ndjson")
+        
+    except Exception as e:
+        logger.error(f"❌ GPU RAG failed: {e}")
+        async def error_stream():
+            yield json.dumps({
+                "status": "error",
+                "content": f"GPU 가속 RAG 처리 중 오류가 발생했습니다: {str(e)}",
+                "references": [],
+                "metadata": {"request_id": request_id, "error": True}
+            }, ensure_ascii=False)
+        return StreamingResponse(error_stream(), media_type="application/x-ndjson")
+
+
+async def ask_legacy(request: AskRequest):
+    """레거시 RAG 엔드포인트 (GPU 미사용)"""
+    request_id = request.request_id
+    
     try:
         if not all(k in app_state for k in ["embeddings", "qdrant_clients"]):
             raise HTTPException(status_code=503, detail="서비스가 준비되지 않았습니다.")
-
-        # Use validated model if security is enabled
-        if SECURITY_ENABLED:
-            body = await req.json()
-            validated_request = QuestionRequest(**body)
-            question = validated_request.question
-            model = validated_request.model
-            source = validated_request.source
-        else:
-            # Legacy validation
-            body = await req.json()
-            question = body.get("question", "").strip()
-            model = body.get("model", config.DEFAULT_LLM_MODEL)
-            source = body.get("source", "mail")  # 기본 mail
-
-            if source not in ("mail", "doc"):
-                raise HTTPException(status_code=400, detail="source must be 'mail' or 'doc'")
-
-            if not question:
-                raise HTTPException(status_code=400, detail="질문이 비어있습니다.")
         
-        if any(greet in question for greet in config.GREETINGS):
-            async def greeting_stream():
-                yield json.dumps({"answer_chunk": "안녕하세요! 무엇을 도와드릴까요?", "references": []})
-            return StreamingResponse(greeting_stream(), media_type="application/x-ndjson")
-
-        logger.info(f"[{request_id}] 📨 Original Question: {question}")
-        logger.info(f"[{request_id}] 📁 Source: {source}")
-        logger.info(f"[{request_id}] 🤖 Model: {model}")
+        logger.info(f"[{request_id}] 📨 Legacy Question: {request.query}")
+        logger.info(f"[{request_id}] 📁 Source: {request.source.value}")
         
-        client = app_state["qdrant_clients"][source]
-        context_text, references = search_qdrant(question, request_id, client, config, source)
+        client = app_state["qdrant_clients"][request.source.value]
+        context_text, references = search_qdrant(request.query, request_id, client, config, request.source.value)
         
         if not context_text:
-            logger.warning(f"[{request_id}] ⚠️ No context found for question: {question}")
+            logger.warning(f"[{request_id}] ⚠️ No context found for question: {request.query}")
         else:
             logger.info(f"[{request_id}] ✅ Context prepared with {len(references)} references")
         
         # source에 따른 메타프롬프트 분리
-        if source == "mail":
+        if request.source.value == "mail":
             final_prompt = dedent(f"""\
                 당신은 HD현대미포 선각기술부의 메일 검색 비서입니다.
                 반드시 한국어로 간결하게 답변하세요.
                 
-                질문: {question}
+                질문: {request.query}
 
                 참고 메일:
                 {context_text or "참고 자료 없음"}
@@ -886,7 +1031,7 @@ async def ask(
                 당신은 HD현대미포 선각기술부의 문서 검색 비서입니다.
                 반드시 한국어로 간결하게 답변하세요.
                 
-                질문: {question}
+                질문: {request.query}
 
                 참고 문서:
                 {context_text or "참고 자료 없음"}
@@ -917,13 +1062,13 @@ async def ask(
 
         async def response_generator():
             full_answer = ""
-            async for chunk in stream_llm_response(final_prompt, model, request_id):
+            async for chunk in stream_llm_response(final_prompt, request.model.value, request_id):
                 full_answer += chunk
                 yield json.dumps({"answer_chunk": chunk}) + "\n"
             
             yield json.dumps({"references": references}) + "\n"
             
-            dialog_cache.append((question, full_answer))
+            # dialog_cache.append((request.query, full_answer))  # Commented out for now
             
             # LLM 최종 답변 로깅
             if DEBUG_MODE:
@@ -936,12 +1081,12 @@ async def ask(
         return StreamingResponse(response_generator(), media_type="application/x-ndjson")
 
     except Exception as e:
-        logger.error(f"[{request_id}] /ask 엔드포인트에서 오류 발생: {e}", exc_info=True)
+        logger.error(f"[{request_id}] Legacy RAG 엔드포인트에서 오류 발생: {e}", exc_info=True)
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail="An internal server error occurred.")
     finally:
-        logger.info(f"--- RAG REQUEST END: {request_id} ---")
+        logger.info(f"--- Legacy RAG REQUEST END: {request_id} ---")
 
 
 # --------------------------------------------------------------------------

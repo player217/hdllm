@@ -9,7 +9,8 @@ import os
 import asyncio
 import logging
 import time
-from typing import Dict, Optional, Any, List, Union
+import json
+from typing import Dict, Optional, Any, List, Union, AsyncIterator
 from dataclasses import dataclass, field
 from collections import deque
 from contextlib import asynccontextmanager
@@ -31,6 +32,24 @@ class ResourceConfig:
     # Ollama 동시성 제어
     ollama_max_concurrency: int = int(os.getenv("OLLAMA_MAX_CONCURRENCY", "8"))
     ollama_endpoint: str = os.getenv("OLLAMA_ENDPOINT", "http://127.0.0.1:11434")
+    
+    # 임베딩 설정 추가
+    embed_backend: str = os.getenv("EMBED_BACKEND", "st")
+    embed_model: str = os.getenv("EMBED_MODEL", "BAAI/bge-m3") 
+    embed_device: str = os.getenv("EMBED_DEVICE", "auto")
+    embed_batch: int = int(os.getenv("EMBED_BATCH", "64"))
+    
+    # Collection 네임스페이스 설정 추가
+    qdrant_namespace: str = os.getenv("QDRANT_NAMESPACE", "default")
+    qdrant_env: str = os.getenv("QDRANT_ENV", "dev")
+    
+    def get_collection_name(self, source_type: str, base_name: str = "documents") -> str:
+        """동적 컬렉션명 생성"""
+        return f"{self.qdrant_namespace}_{self.qdrant_env}_{source_type}_{base_name}"
+    
+    # 파이프라인 설정
+    app_max_concurrency: int = int(os.getenv("APP_MAX_CONCURRENCY", "8"))
+    queue_max: int = int(os.getenv("QUEUE_MAX", "64"))
     
     # HTTP 클라이언트 설정
     http_timeout_ms: int = int(os.getenv("HTTP_TIMEOUT_MS", "3000"))
@@ -298,6 +317,29 @@ class OllamaTokenBucket:
                 "circuit_breaker": self.circuit_breaker.get_status()
             }
     
+    async def generate_embedding(self, model: str, text: str) -> List[float]:
+        """통일된 임베딩 생성 메서드 - ENV 기반 엔드포인트 + input 필드"""
+        async with self.acquire_token():
+            try:
+                # ENV 기반 엔드포인트 사용 (하드코딩 제거) - 슬래시 중복 방지
+                base = (self.config.ollama_endpoint or "").rstrip("/")
+                endpoint = f"{base}/api/embeddings"
+                
+                response = await self.client.post(
+                    endpoint,
+                    json={
+                        "model": model,
+                        "input": text  # prompt → input 필드로 수정 (Ollama API 규격)
+                    },
+                    timeout=30.0
+                )
+                response.raise_for_status()
+                result = response.json()
+                return result.get("embedding", [])
+            except Exception as e:
+                logger.error(f"❌ Ollama embedding failed: {e}")
+                raise
+
     async def cleanup(self):
         """리소스 정리"""
         await self.client.aclose()
@@ -428,6 +470,12 @@ class ResourceManager:
     def __init__(self, config: Optional[ResourceConfig] = None):
         self.config = config or ResourceConfig()
         
+        # 임베딩 관련 속성
+        self.embedder = None
+        self.embed_backend = config.embed_backend
+        self.embed_model = config.embed_model
+        self.embed_device = None  # Will be resolved in from_env()
+        
         # Ollama 토큰 버킷
         self.ollama_bucket = OllamaTokenBucket(self.config)
         
@@ -473,6 +521,182 @@ class ResourceManager:
         
         return status
     
+    def _resolve_device(self, spec: str) -> str:
+        """디바이스 자동 감지"""
+        if spec == "auto":
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    logger.info(f"🚀 GPU detected: {torch.cuda.get_device_name(0)}")
+                    return "cuda:0"
+            except Exception as e:
+                logger.warning(f"⚠️ GPU check failed: {e}")
+            logger.info("📱 Using CPU device")
+            return "cpu"
+        return spec
+    
+    def _load_st_model(self, model_name: str, device: str) -> Any:
+        """SentenceTransformer 모델 로드"""
+        try:
+            from sentence_transformers import SentenceTransformer
+            import torch
+            
+            model = SentenceTransformer(model_name, device=device)
+            
+            # GPU에서 컴파일 최적화 시도
+            if device.startswith("cuda") and hasattr(torch, 'compile'):
+                try:
+                    model = torch.compile(model)
+                    logger.info("🔥 Model compilation enabled (PyTorch 2.0+)")
+                except Exception as e:
+                    logger.warning(f"⚠️ Model compilation failed: {e}")
+            
+            logger.info(f"✅ Loaded {model_name} on {device}")
+            return model
+        except Exception as e:
+            logger.error(f"❌ Failed to load model {model_name}: {e}")
+            raise
+    
+    async def embed_texts(self, texts: List[str]) -> List[List[float]]:
+        """텍스트 배치 임베딩 생성"""
+        if not self.embedder:
+            raise ValueError("Embedder not initialized")
+        
+        try:
+            # 배치 크기 제한
+            batch_size = min(self.config.embed_batch, len(texts))
+            
+            if self.embed_backend == "st":
+                # SentenceTransformer 사용
+                embeddings = await asyncio.to_thread(
+                    self.embedder.encode,
+                    texts,
+                    batch_size=batch_size,
+                    show_progress_bar=False,
+                    convert_to_tensor=False,
+                    normalize_embeddings=True
+                )
+                return embeddings.tolist() if hasattr(embeddings, 'tolist') else embeddings
+            
+            elif self.embed_backend == "ollama":
+                # 통일된 클라이언트 래퍼 사용
+                embeddings = []
+                for text in texts:
+                    embedding = await self.ollama_bucket.generate_embedding(
+                        model=self.embed_model,
+                        text=text
+                    )
+                    embeddings.append(embedding)
+                return embeddings
+            
+            else:
+                raise ValueError(f"Unknown embedding backend: {self.embed_backend}")
+                
+        except Exception as e:
+            logger.error(f"❌ Embedding generation failed: {e}")
+            raise
+    
+    @classmethod
+    def from_env(cls) -> 'ResourceManager':
+        """환경 변수에서 설정 로드 및 초기화"""
+        config = ResourceConfig()
+        manager = cls(config)
+        
+        # 디바이스 해결
+        manager.embed_device = manager._resolve_device(config.embed_device)
+        
+        # 임베딩 모델 로드
+        if config.embed_backend == "st":
+            manager.embedder = manager._load_st_model(config.embed_model, manager.embed_device)
+        
+        logger.info(f"🎯 ResourceManager initialized with {config.embed_backend} on {manager.embed_device}")
+        return manager
+    
+    async def search_vectors(
+        self, 
+        source_type: str, 
+        collection_name: str,
+        query_vector: List[float], 
+        limit: int = 10,
+        score_threshold: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        """벡터 검색 프록시 메서드"""
+        try:
+            client = self.clients.get_qdrant_client(source_type)
+            
+            # 동기 함수를 비동기로 실행
+            results = await asyncio.to_thread(
+                client.search,
+                collection_name=collection_name,
+                query_vector=query_vector,
+                limit=limit,
+                score_threshold=score_threshold,
+                with_payload=True,
+                with_vectors=False  # 성능 최적화
+            )
+            
+            # 결과를 딕셔너리 형태로 변환
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "id": result.id,
+                    "score": result.score,
+                    "payload": result.payload
+                })
+            
+            logger.info(f"🔍 Vector search completed: {len(formatted_results)} results")
+            return formatted_results
+            
+        except Exception as e:
+            logger.error(f"❌ Vector search failed: {e}")
+            raise
+    
+    async def generate_llm_response(self, prompt: str, model: str, stream: bool = False):
+        """Unified LLM response generation with streaming support
+        
+        Args:
+            prompt: The prompt to send to LLM
+            model: Model name (e.g., 'gemma3:4b') 
+            stream: If True, returns AsyncIterator[str], else returns str
+            
+        Returns:
+            For stream=False: Complete response as string
+            For stream=True: AsyncIterator yielding response tokens
+        """
+        base = (self.config.ollama_endpoint or "").rstrip("/")
+        endpoint = f"{base}/api/generate"
+        
+        if not stream:
+            # Non-streaming path
+            resp = await self.ollama_bucket.client.post(
+                endpoint, 
+                json={"model": model, "prompt": prompt, "stream": False}, 
+                timeout=120.0
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("response", "")
+
+        # Streaming path
+        async def _gen() -> AsyncIterator[str]:
+            async with self.ollama_bucket.client.stream(
+                "POST", 
+                endpoint, 
+                json={"model": model, "prompt": prompt, "stream": True}, 
+                timeout=120.0
+            ) as r:
+                r.raise_for_status()
+                async for line in r.aiter_lines():
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                        yield obj.get("response", "")
+                    except Exception:
+                        # 방어적 파싱 실패 시 라인 그대로 흘려보냄
+                        yield ""
+        return _gen()
+
     async def cleanup(self):
         """전체 리소스 정리"""
         logger.info("🧹 ResourceManager cleanup started")

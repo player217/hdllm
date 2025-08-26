@@ -11,6 +11,7 @@ from datetime import datetime
 from enum import Enum
 import uuid
 import re
+from backend.common.validators import sanitize_basic, assert_safe
 
 
 # Enums
@@ -316,19 +317,11 @@ class ChatRequest(BaseRequest):
     )
     
     @validator('question')
-    def validate_question(cls, v):
-        """Validate and sanitize question"""
-        # Remove null bytes
-        v = v.replace('\x00', '')
-        # Check for SQL injection patterns
-        sql_patterns = [
-            r"(DROP|DELETE|INSERT|UPDATE|EXEC|EXECUTE)",
-            r"(--|;|'|\"|\*|\||\\)"
-        ]
-        for pattern in sql_patterns:
-            if re.search(pattern, v, re.IGNORECASE):
-                raise ValueError("Invalid characters in question")
-        return v.strip()
+    def validate_question(cls, v: str):
+        """Validate and sanitize question using common validators"""
+        v = sanitize_basic(v)
+        assert_safe(v)
+        return v
     source: SourceType = Field(
         default=SourceType.MAIL,
         description="Knowledge source"
@@ -382,18 +375,11 @@ class AskRequest(BaseRequest):
         return values
     
     @validator('query')
-    def validate_query(cls, v):
-        """Validate and sanitize query"""
-        v = v.replace('\x00', '')
-        # Check for SQL injection patterns
-        sql_patterns = [
-            r"(DROP|DELETE|INSERT|UPDATE|EXEC|EXECUTE)",
-            r"(--|;|'|\"|\*|\||\\)"
-        ]
-        for pattern in sql_patterns:
-            if re.search(pattern, v, re.IGNORECASE):
-                raise ValueError("Invalid characters in query")
-        return v.strip()
+    def validate_query(cls, v: str):
+        """Validate and sanitize query using common validators"""
+        v = sanitize_basic(v)
+        assert_safe(v)
+        return v
 
 class IngestRequest(BaseRequest):
     """Document ingestion request for async processing"""
