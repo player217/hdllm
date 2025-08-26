@@ -6,10 +6,11 @@ Description: Phase 2C - Common data models and validation schemas
 """
 
 from typing import List, Dict, Any, Optional, Union, Literal
-from pydantic import BaseModel, Field, validator, ConfigDict
+from pydantic import BaseModel, Field, validator, root_validator, ConfigDict
 from datetime import datetime
 from enum import Enum
 import uuid
+import re
 
 
 # Enums
@@ -132,6 +133,8 @@ class Chunk(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("Text cannot be empty")
+        # Basic sanitization
+        v = v.replace('\x00', '')  # Remove null bytes
         return v
 
 
@@ -194,6 +197,21 @@ class SearchRequest(BaseRequest):
         max_length=2000,
         description="Search query"
     )
+    
+    @validator('query')
+    def validate_query(cls, v):
+        """Validate and sanitize query"""
+        # Remove null bytes
+        v = v.replace('\x00', '')
+        # Check for SQL injection patterns
+        sql_patterns = [
+            r"(DROP|DELETE|INSERT|UPDATE|EXEC|EXECUTE)",
+            r"(--|;|'|\"|\*|\||\\)"
+        ]
+        for pattern in sql_patterns:
+            if re.search(pattern, v, re.IGNORECASE):
+                raise ValueError("Invalid characters in query")
+        return v.strip()
     source: SourceType = Field(
         default=SourceType.MAIL,
         description="Search source"
@@ -296,6 +314,21 @@ class ChatRequest(BaseRequest):
         max_length=2000,
         description="User question"
     )
+    
+    @validator('question')
+    def validate_question(cls, v):
+        """Validate and sanitize question"""
+        # Remove null bytes
+        v = v.replace('\x00', '')
+        # Check for SQL injection patterns
+        sql_patterns = [
+            r"(DROP|DELETE|INSERT|UPDATE|EXEC|EXECUTE)",
+            r"(--|;|'|\"|\*|\||\\)"
+        ]
+        for pattern in sql_patterns:
+            if re.search(pattern, v, re.IGNORECASE):
+                raise ValueError("Invalid characters in question")
+        return v.strip()
     source: SourceType = Field(
         default=SourceType.MAIL,
         description="Knowledge source"
@@ -325,6 +358,51 @@ class ChatRequest(BaseRequest):
         description="Include source documents"
     )
 
+
+# Enhanced Request Models for Pipeline
+class AskRequest(BaseRequest):
+    """Enhanced ask request with pipeline support"""
+    query: str = Field(min_length=1, max_length=2000, description="Search query")
+    source: SourceType = Field(default=SourceType.MAIL, description="Data source")
+    model: ModelType = Field(default=ModelType.GEMMA3_4B, description="LLM model")
+    top_k: int = Field(default=10, ge=1, le=100, description="Number of results")
+    filters: Dict[str, Any] = Field(default_factory=dict, description="Search filters")
+    stream: bool = Field(default=False, description="Enable streaming response")
+    
+    @root_validator(pre=True)
+    def _compat_question_alias(cls, values):
+        """Backward compatibility: accept 'question' field and map to 'query'
+        
+        This validator ensures existing clients sending {"question": "..."} 
+        continue to work while new clients can use {"query": "..."}.
+        The 'question' field is consumed and replaced with 'query'.
+        """
+        if "query" not in values and "question" in values:
+            values["query"] = values.pop("question")
+        return values
+    
+    @validator('query')
+    def validate_query(cls, v):
+        """Validate and sanitize query"""
+        v = v.replace('\x00', '')
+        # Check for SQL injection patterns
+        sql_patterns = [
+            r"(DROP|DELETE|INSERT|UPDATE|EXEC|EXECUTE)",
+            r"(--|;|'|\"|\*|\||\\)"
+        ]
+        for pattern in sql_patterns:
+            if re.search(pattern, v, re.IGNORECASE):
+                raise ValueError("Invalid characters in query")
+        return v.strip()
+
+class IngestRequest(BaseRequest):
+    """Document ingestion request for async processing"""
+    path: str = Field(description="File path to ingest")
+    source: SourceType = Field(default=SourceType.DOCUMENT, description="Document source")
+    chunk_size: int = Field(default=1000, ge=100, le=5000, description="Chunk size")
+    chunk_overlap: int = Field(default=200, ge=0, le=500, description="Chunk overlap")
+    batch_size: int = Field(default=256, ge=32, le=1024, description="Batch size for processing")
+    extract_metadata: bool = Field(default=True, description="Extract document metadata")
 
 # Response Models
 class SearchResponse(BaseResponse):
