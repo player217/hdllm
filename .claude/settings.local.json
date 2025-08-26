@@ -52,7 +52,21 @@
       "mcp__git__git_init",
       "mcp__git__git_remote",
       "mcp__git__git_add",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "mcp__git__git_commit",
+      "Bash(git config:*)",
+      "Bash(git --version)",
+      "Bash(gh:*)",
+      "Bash(where git)",
+      "mcp__sequential-thinking__sequentialthinking",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)"
     ],
     "deny": []
   }

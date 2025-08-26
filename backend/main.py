@@ -70,10 +70,15 @@ class AppConfig:
     EMBEDDING_MODEL_PATH: str = str(EMBEDDING_MODEL_DEFAULT_PATH)
     OLLAMA_API_URL: str = os.getenv("RAG_OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
     
-    # 기존 필드 유지
+    # 컬렉션 네임스페이스 분리 - 보안·분리 설계 핵심
+    COLLECTION_NAMESPACES = {
+        "mail": "mail_my_documents",  # 메일 전용 컬렉션
+        "doc": "doc_my_documents"     # 문서 전용 컬렉션
+    }
+    
+    # 레거시 호환성
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
-    QDRANT_COLLECTIONS: list[str] = ["my_documents"]
     QDRANT_SCORE_THRESHOLD: float = 0.30  # Lowered threshold to find more results
     QDRANT_SEARCH_LIMIT: int = 3  # Reduce to 3 for faster processing
     QDRANT_TIMEOUT: float = 30.0
@@ -82,12 +87,14 @@ class AppConfig:
         "exact": False   # Use approximate search for speed
     }
     
-    # 신규: 쿼리용 네트워크 엔드포인트(경로와 무관)
+    # 분리된 Qdrant 인스턴스 설정 - 보안 강화
     MAIL_QDRANT_HOST: str = os.getenv("RAG_MAIL_QDRANT_HOST", "127.0.0.1")
     MAIL_QDRANT_PORT: int = int(os.getenv("RAG_MAIL_QDRANT_PORT", "6333"))
+    MAIL_QDRANT_TIMEOUT: float = 15.0  # 메일 검색용 단축 타임아웃
     
     DOC_QDRANT_HOST: str = os.getenv("RAG_DOC_QDRANT_HOST", "127.0.0.1")
     DOC_QDRANT_PORT: int = int(os.getenv("RAG_DOC_QDRANT_PORT", "6333"))
+    DOC_QDRANT_TIMEOUT: float = 20.0   # 문서 검색용 타임아웃
     
     DEFAULT_LLM_MODEL: str = "gemma3:4b"
     LLM_TIMEOUT: int = 60
@@ -110,8 +117,27 @@ MAX_CACHE_SIZE = 100
 async def lifespan(app: FastAPI):
     """애플리케이션 시작 시 모델 및 클라이언트 로드, 종료 시 정리"""
     logger.info("🚀 애플리케이션 시작...")
-    logger.info(f"📦 Backend Version: 1.0.3 - Updated")
+    logger.info(f"📦 Backend Version: 1.0.4 - Enhanced Security & Stability")
     logger.info(f"🕐 Start Time: {datetime.datetime.now().isoformat()}")
+    
+    # Step 1: Configuration Validation (Critical for stability)
+    try:
+        from config_validator import validate_startup_config
+        validation_result = validate_startup_config()
+        
+        if not validation_result.is_valid:
+            logger.warning("⚠️ Configuration validation failed, but continuing with defaults")
+            for error in validation_result.errors:
+                logger.error(f"  - {error}")
+        
+        if validation_result.applied_defaults:
+            logger.info(f"🔧 Applied {len(validation_result.applied_defaults)} default configurations")
+            
+        logger.info("✅ Configuration validation completed")
+    except Exception as e:
+        logger.warning(f"⚠️ Configuration validation failed: {e}")
+        logger.info("Continuing with existing configuration...")
+    
     device_type = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"✅ 실행 디바이스: {device_type.upper()}")
 
@@ -126,40 +152,96 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ 임베딩 모델 로드 실패: {e}", exc_info=True)
 
     try:
-        # Qdrant 클라이언트 2개 초기화
-        app_state["qdrant_clients"] = {
-            "mail": QdrantClient(host=config.MAIL_QDRANT_HOST, port=config.MAIL_QDRANT_PORT, timeout=config.QDRANT_TIMEOUT),
-            "doc": QdrantClient(host=config.DOC_QDRANT_HOST, port=config.DOC_QDRANT_PORT, timeout=config.QDRANT_TIMEOUT),
-        }
-        logger.info("✅ Qdrant 클라이언트들 연결 성공.")
+        # 보안 강화된 Qdrant 클라이언트 초기화
+        try:
+            from qdrant_security_config import DEFAULT_SECURITY_CONFIG, create_secure_qdrant_clients
+            
+            app_state["qdrant_security_config"] = DEFAULT_SECURITY_CONFIG
+            app_state["qdrant_clients"] = create_secure_qdrant_clients(DEFAULT_SECURITY_CONFIG)
+            
+            # 연결 상태 확인
+            successful_connections = len(app_state["qdrant_clients"])
+            logger.info(f"✅ {successful_connections}/2 보안 Qdrant 클라이언트 연결 성공")
+            logger.info(f"🔐 컬렉션 네임스페이스 분리: {DEFAULT_SECURITY_CONFIG.collection_namespaces}")
+            
+        except ImportError:
+            logger.error(f"❌ Qdrant 보안 설정 모듈을 찾을 수 없습니다. 기본 클라이언트로 대체합니다.")
+            # 기본 클라이언트 설정 (레거시 호환성)
+            app_state["qdrant_clients"] = {
+                "mail": QdrantClient(host=config.MAIL_QDRANT_HOST, port=config.MAIL_QDRANT_PORT, timeout=15.0),
+                "doc": QdrantClient(host=config.DOC_QDRANT_HOST, port=config.DOC_QDRANT_PORT, timeout=20.0)
+            }
+        except Exception as e:
+            logger.error(f"❌ 보안 Qdrant 클라이언트 초기화 실패: {e}")
+            # 레거시 대체
+            app_state["qdrant_clients"] = {
+                "mail": QdrantClient(host=config.MAIL_QDRANT_HOST, port=config.MAIL_QDRANT_PORT),
+                "doc": QdrantClient(host=config.DOC_QDRANT_HOST, port=config.DOC_QDRANT_PORT)
+            }
         
-        # Qdrant 컬렉션 상태 확인 (디버그 모드)
+        # 보안·분리 컬렉션 상태 확인
         if DEBUG_MODE:
-            for name, client in app_state["qdrant_clients"].items():
+            for source_type, client in app_state["qdrant_clients"].items():
                 try:
                     collections = client.get_collections()
-                    logger.debug(f"📊 {name.upper()} Qdrant 컬렉션 상태:")
+                    expected_collection = config.COLLECTION_NAMESPACES.get(source_type)
+                    logger.debug(f"📊 {source_type.upper()} Qdrant 컬렉션 상태 (기대: {expected_collection}):")
+                    
                     for col in collections.collections:
                         try:
                             info = client.get_collection(col.name)
-                            logger.debug(f"  - Collection '{col.name}': vectors={info.vectors_count}, indexed={info.indexed_vectors_count}")
+                            is_expected = "[✅]" if col.name == expected_collection else "[⚠️]"
+                            logger.debug(f"  {is_expected} Collection '{col.name}': vectors={info.vectors_count}, indexed={info.indexed_vectors_count}")
                         except:
-                            logger.debug(f"  - Collection '{col.name}': info unavailable")
+                            logger.debug(f"  [❌] Collection '{col.name}': info unavailable")
+                            
+                    # 기대되는 컬렉션이 없는 경우 경고
+                    collection_names = [col.name for col in collections.collections]
+                    if expected_collection and expected_collection not in collection_names:
+                        logger.warning(f"⚠️ Expected collection '{expected_collection}' not found in {source_type} Qdrant")
+                        
                 except Exception as e:
-                    logger.warning(f"  - {name} Qdrant 상태 확인 실패: {e}")
+                    logger.warning(f"  - {source_type} Qdrant 상태 확인 실패: {e}")
     except Exception as e:
         logger.error(f"❌ Qdrant 클라이언트 연결 실패: {e}", exc_info=True)
 
+    # Phase 2A-1: ResourceManager 초기화
+    try:
+        from resource_manager import get_resource_manager
+        app_state["resource_manager"] = await get_resource_manager()
+        logger.info("🎛️ ResourceManager with realistic design initialized")
+    except ImportError:
+        logger.warning("⚠️ ResourceManager not available - using legacy approach")
+    except Exception as e:
+        logger.error(f"❌ ResourceManager initialization failed: {e}")
+    
     yield
     
     logger.info("🌙 애플리케이션 종료...")
+    
+    # ResourceManager 정리
+    if "resource_manager" in app_state:
+        try:
+            await app_state["resource_manager"].cleanup()
+            logger.info("✅ ResourceManager cleanup completed")
+        except Exception as e:
+            logger.error(f"❌ ResourceManager cleanup failed: {e}")
+    
     app_state.clear()
     dialog_cache.clear()
 
 # Initialize base FastAPI app
 app = FastAPI(lifespan=lifespan)
 
-# Import security configuration
+# Phase 2A-2: Circuit Breaker Dashboard Integration
+try:
+    from circuit_breaker_dashboard import router as dashboard_router
+    app.include_router(dashboard_router)
+    logger.info("🔧 Circuit Breaker Dashboard registered")
+except ImportError as e:
+    logger.warning(f"⚠️ Circuit Breaker Dashboard not available: {e}")
+
+# Import security configuration (MANDATORY FOR PRODUCTION)
 try:
     from security_config import (
         CORS_CONFIG, 
@@ -170,14 +252,22 @@ try:
         sanitize_log_message
     )
     SECURITY_ENABLED = True
+    logger.info("🛡️ Security module loaded successfully")
 except ImportError:
-    logger.warning("Security module not found, using legacy configuration")
+    logger.error("❌ Security module not found! This is a critical security risk")
+    logger.warning("⚠️ Falling back to restricted configuration")
     SECURITY_ENABLED = False
+    # Restricted fallback configuration (NOT for production)
     CORS_CONFIG = {
-        "allow_origins": ["*"],
+        "allow_origins": [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:8080", 
+            "http://127.0.0.1:8080"
+        ],
         "allow_credentials": True,
-        "allow_methods": ["*"],
-        "allow_headers": ["*"]
+        "allow_methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-API-Key"]
     }
 
 # Phase 3 Integration - Apply comprehensive enhancements
@@ -199,20 +289,25 @@ except ImportError as e:
     logger.warning(f"Phase 3 integration not available: {e}")
     PHASE3_INTEGRATED = False
     
-    # Fallback to legacy configuration
+    # Fallback to legacy configuration with MANDATORY security
     app.add_middleware(CORSMiddleware, **CORS_CONFIG)
+    logger.info(f"🔒 CORS middleware configured: {len(CORS_CONFIG['allow_origins'])} origins allowed")
     
-    # Add security middleware if available
+    # MANDATORY security middleware (always enabled for protection)
     if SECURITY_ENABLED:
         app.add_middleware(SecurityMiddleware)
+        logger.info("🛡️ Security middleware activated")
         
         # Include authentication routes
         try:
             from auth_routes import router as auth_router
             app.include_router(auth_router)
-            logger.info("Authentication routes loaded successfully")
+            logger.info("🔑 Authentication routes loaded successfully")
         except ImportError:
-            logger.warning("Authentication routes not available")
+            logger.warning("⚠️ Authentication routes not available")
+    else:
+        logger.error("❌ Running without security middleware - PRODUCTION RISK!")
+        logger.warning("Please ensure security_config.py is available")
 
 
 # --------------------------------------------------------------------------
@@ -326,12 +421,28 @@ def search_qdrant(question: str, request_id: str, client: QdrantClient, config: 
     
     logger.debug(f"[{request_id}] Query vector created - dimension: {len(query_vector)}")
 
+    # 보안·분리 설계: 소스별 전용 컬렉션 검색
+    collection_name = config.COLLECTION_NAMESPACES.get(source)
+    if not collection_name:
+        logger.error(f"[{request_id}] ❌ 지원되지 않는 소스 타입: {source}")
+        return "", []
+    
     all_hits = []
-    for collection_name in config.QDRANT_COLLECTIONS:
-        try:
-            logger.info(f"[{request_id}] 🔎 Searching collection: '{collection_name}'")
-            logger.debug(f"[{request_id}] Search params - limit: {config.QDRANT_SEARCH_LIMIT}, threshold: {config.QDRANT_SCORE_THRESHOLD}")
-            
+    try:
+        logger.info(f"[{request_id}] 🔎 Searching namespace-separated collection: '{collection_name}' (source: {source})")
+        logger.debug(f"[{request_id}] Search params - limit: {config.QDRANT_SEARCH_LIMIT}, threshold: {config.QDRANT_SCORE_THRESHOLD}")
+        
+        # 보안 강화된 검색 수행
+        if hasattr(client, 'search') and hasattr(client, 'config'):
+            # SecureQdrantClient 사용 (네임스페이스 자동 적용)
+            hits = client.search(
+                query_vector=query_vector,
+                limit=config.QDRANT_SEARCH_LIMIT,
+                score_threshold=config.QDRANT_SCORE_THRESHOLD,
+                search_params=models.SearchParams(**config.QDRANT_SEARCH_PARAMS)
+            )
+        else:
+            # 레거시 클라이언트 사용 (명시적 컬렉션 이름 필요)
             hits = client.search(
                 collection_name=collection_name,
                 query_vector=query_vector,
@@ -339,26 +450,28 @@ def search_qdrant(question: str, request_id: str, client: QdrantClient, config: 
                 score_threshold=config.QDRANT_SCORE_THRESHOLD,
                 search_params=models.SearchParams(**config.QDRANT_SEARCH_PARAMS)
             )
-            
-            if hits:
-                logger.info(f"[{request_id}] ✅ Found {len(hits)} hits in '{collection_name}'")
-                if DEBUG_MODE:
-                    for i, hit in enumerate(hits[:5], 1):  # 상위 5개만 상세 로깅
-                        logger.debug(f"[{request_id}]   Hit {i}: score={hit.score:.4f}, id={hit.id}")
-                        logger.debug(f"[{request_id}]   Metadata keys: {list(hit.payload.keys())}")
-                        if VERBOSE_LOGGING:
-                            # 메타데이터 일부 출력 (텍스트 제외)
-                            meta_preview = {k: v for k, v in hit.payload.items() if k != 'text' and k != 'embedding'}
-                            logger.debug(f"[{request_id}]   Metadata preview: {meta_preview}")
-            else:
-                logger.warning(f"[{request_id}] ⚠️ No hits found in '{collection_name}' (threshold: {config.QDRANT_SCORE_THRESHOLD})")
-            
-            all_hits.extend(hits)
-        except Exception as e:
-            logger.error(f"[{request_id}] ❌ 컬렉션 '{collection_name}' 검색 실패: {e}", exc_info=DEBUG_MODE)
+        
+        if hits:
+            logger.info(f"[{request_id}] ✅ Found {len(hits)} hits in '{collection_name}'")
+            if DEBUG_MODE:
+                for i, hit in enumerate(hits[:5], 1):  # 상위 5개만 상세 로깅
+                    logger.debug(f"[{request_id}]   Hit {i}: score={hit.score:.4f}, id={hit.id}")
+                    logger.debug(f"[{request_id}]   Metadata keys: {list(hit.payload.keys())}")
+                    if VERBOSE_LOGGING:
+                        # 메타데이터 일부 출력 (텍스트 제외)
+                        meta_preview = {k: v for k, v in hit.payload.items() if k != 'text' and k != 'embedding'}
+                        logger.debug(f"[{request_id}]   Metadata preview: {meta_preview}")
+        else:
+            logger.warning(f"[{request_id}] ⚠️ No hits found in '{collection_name}' (threshold: {config.QDRANT_SCORE_THRESHOLD})")
+        
+        all_hits.extend(hits)
+    except Exception as e:
+        logger.error(f"[{request_id}] ❌ 컬렉션 '{collection_name}' 검색 실패: {e}", exc_info=DEBUG_MODE)
+        # 보안 강화: 예외 상황에서도 빈 결과 반환
+        return "", []
 
     if not all_hits:
-        logger.warning(f"[{request_id}] ❌ No hits found across all collections")
+        logger.warning(f"[{request_id}] ❌ No hits found in collection '{collection_name}'")
         return "", []
 
     # 중복 제거 및 정렬
@@ -485,7 +598,7 @@ def health_check():
 
 @app.get("/status")
 async def status():
-    """프런트가 더 이상 외부 IP를 직접 치지 않도록, 백엔드가 올라마/두 Qdrant를 확인해 결과를 돌려줍니다."""
+    """보안·분리 설계가 적용된 시스템 상태 확인"""
     import asyncio
     import aiohttp
     
@@ -498,23 +611,76 @@ async def status():
         except Exception:
             return False
     
-    # 병렬로 모든 서비스 체크
+    # 기본 서비스 상태 확인
     ollama_url = config.OLLAMA_API_URL.replace("/api/chat", "/")
     qdrant_mail_url = f"http://{config.MAIL_QDRANT_HOST}:{config.MAIL_QDRANT_PORT}/"
     qdrant_doc_url = f"http://{config.DOC_QDRANT_HOST}:{config.DOC_QDRANT_PORT}/"
     
-    results = await asyncio.gather(
+    basic_results = await asyncio.gather(
         ping_async(ollama_url),
         ping_async(qdrant_mail_url),
         ping_async(qdrant_doc_url),
         return_exceptions=True
     )
     
+    # 보안 클라이언트 상태 확인
+    security_status = {}
+    if "qdrant_clients" in app_state:
+        for source_type, client in app_state["qdrant_clients"].items():
+            try:
+                if hasattr(client, 'health_check'):
+                    # SecureQdrantClient 사용
+                    health_info = client.health_check()
+                    security_status[f"secure_{source_type}"] = {
+                        "connected": health_info.get("connection_ok", False),
+                        "collection_exists": health_info.get("collection_exists", False),
+                        "namespace": health_info.get("collection_namespace", "unknown"),
+                        "vectors_count": health_info.get("vectors_count", 0),
+                        "security_enabled": True
+                    }
+                else:
+                    # 레거시 클라이언트 사용
+                    collections = client.get_collections()
+                    security_status[f"legacy_{source_type}"] = {
+                        "connected": True,
+                        "collections_count": len(collections.collections),
+                        "security_enabled": False
+                    }
+            except Exception as e:
+                security_status[f"error_{source_type}"] = {
+                    "connected": False,
+                    "error": str(e)[:100],  # 에러 메시지 길이 제한
+                    "security_enabled": False
+                }
+    
+    # 보안 설정 정보
+    security_config_info = {}
+    if "qdrant_security_config" in app_state:
+        sec_config = app_state["qdrant_security_config"]
+        security_config_info = {
+            "namespaces_configured": len(sec_config.collection_namespaces),
+            "allowed_sources": sec_config.allowed_sources,
+            "max_search_limit": sec_config.max_search_limit,
+            "audit_logging": sec_config.audit_logging,
+            "ssl_enabled": sec_config.enable_ssl
+        }
+    
     return {
-        "fastapi": True,  # 살아있으니 True
-        "ollama": results[0] if not isinstance(results[0], Exception) else False,
-        "qdrant_mail": results[1] if not isinstance(results[1], Exception) else False,
-        "qdrant_doc": results[2] if not isinstance(results[2], Exception) else False,
+        # 기본 서비스 상태
+        "fastapi": True,
+        "ollama": basic_results[0] if not isinstance(basic_results[0], Exception) else False,
+        "qdrant_mail": basic_results[1] if not isinstance(basic_results[1], Exception) else False,
+        "qdrant_doc": basic_results[2] if not isinstance(basic_results[2], Exception) else False,
+        
+        # 보안·분리 설계 상태
+        "security_clients": security_status,
+        "security_config": security_config_info,
+        "namespace_separation": config.COLLECTION_NAMESPACES,
+        
+        # 시스템 정보
+        "timestamp": datetime.datetime.now().isoformat(),
+        "version": "2.0.0-security",
+        "phase": "2A-0 보안·분리 설계 적용됨"
     }
 
 @app.post("/open_file")

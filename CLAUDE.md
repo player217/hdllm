@@ -1932,7 +1932,212 @@ class MetricsCollector:
 
 ---
 
+## 🔐 보안 가이드라인 및 모범 사례
+
+### 시스템 보안 원칙
+1. **심층 방어 (Defense in Depth)**: 다층 보안 시스템 구축
+2. **최소 권한 원칙**: 필요한 최소 권한만 부여
+3. **실패 안전 (Fail-Safe)**: 보안 실패 시 안전한 상태로 전환
+4. **투명성과 검증 가능성**: 보안 조치의 투명한 로깅
+
+### 인증 및 인가
+
+#### API 키 기반 인증
+```python
+# 구현됨 - security_config.py
+API_KEYS = {
+    "dev_key_001": "development",
+    "prod_key_001": "production"  
+}
+
+# 사용법
+headers = {"X-API-Key": "dev_key_001"}
+response = requests.post("/ask", headers=headers, json=data)
+```
+
+#### JWT 토큰 인증 (권장)
+```python
+# 미래 구현 계획
+from jose import jwt
+
+def create_access_token(data: dict):
+    return jwt.encode(data, SECRET_KEY, algorithm="HS256")
+
+def verify_token(token: str):
+    return jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+```
+
+### 네트워크 보안
+
+#### CORS 설정 (현재 적용됨)
+```python
+# 적절히 제한된 CORS 설정
+CORS_CONFIG = {
+    "allow_origins": [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8080", 
+        "http://127.0.0.1:8080"
+    ],
+    "allow_methods": ["GET", "POST", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization", "X-API-Key"]
+}
+```
+
+#### Rate Limiting (구현됨)
+```python
+# 속도 제한 설정
+RATE_LIMIT_CONFIG = {
+    "requests_per_minute": 60,
+    "requests_per_hour": 1000,
+    "burst_size": 10
+}
+```
+
+### 데이터 보안
+
+#### PII 마스킹 (구현됨)
+```python
+# 한국어 특화 PII 패턴
+patterns = {
+    "korean_ssn": r"\d{6}[-\s]?[1-4]\d{6}",    # 주민등록번호
+    "korean_phone": r"01[0-9][-\s]?\d{3,4}[-\s]?\d{4}",  # 휴대폰
+    "korean_tel": r"0[2-6][0-9]?[-\s]?\d{3,4}[-\s]?\d{4}",  # 일반전화
+    "korean_bizno": r"\d{3}[-\s]?\d{2}[-\s]?\d{5}",  # 사업자번호
+    "email": r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+    "employee_id": r"HD\d{6,8}",  # HD현대 직원번호
+    "doc_id": r"DOC-\d{4}-\d{6}"  # 문서 ID
+}
+```
+
+#### 입력 검증 (구현됨)
+```python
+class QuestionRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=2000)
+    
+    @validator('question')
+    def sanitize_question(cls, v):
+        # SQL 인젝션 방지 패턴
+        dangerous_patterns = [
+            r"(DROP|DELETE|INSERT|UPDATE|EXEC|EXECUTE)\s",
+            r"(--|;|'|\"|\\/\\*|\\*\\/|xp_|sp_|0x)",
+            r"(UNION|SELECT|FROM|WHERE)\s.*\s(SELECT|FROM|WHERE)"
+        ]
+        for pattern in dangerous_patterns:
+            if re.search(pattern, v, re.IGNORECASE):
+                raise ValueError("Invalid characters detected")
+        return v.strip()
+```
+
+### 로깅 보안
+
+#### 안전한 로깅 (구현됨)
+```python
+def sanitize_log_message(message: str) -> str:
+    # 줄바꿈 제거 (로그 인젝션 방지)
+    message = message.replace('\n', ' ').replace('\r', ' ')
+    
+    # PII 마스킹 적용
+    masker = EnhancedPIIMasker()
+    message = masker.mask(message)
+    
+    return message
+```
+
+### 파일 시스템 보안
+
+#### 경로 탐색 공격 방지
+```python
+def sanitize_file_path(path: str) -> str:
+    # 디렉토리 탐색 시도 제거
+    path = path.replace("..", "")
+    path = path.replace("~/", "")
+    path = path.replace("//", "/")
+    
+    # 시스템 디렉토리 접근 차단
+    forbidden_prefixes = ["/etc", "/usr", "/bin", "/sbin", "/sys", "/proc"]
+    for prefix in forbidden_prefixes:
+        if path.startswith(prefix):
+            raise ValueError(f"Access to {prefix} is forbidden")
+    
+    return path
+```
+
+### 환경 변수 및 설정 보안
+
+#### 중요 정보 관리 원칙
+1. **환경 변수 사용**: 중요한 설정은 환경 변수로 관리
+2. **기본값 제공**: 보안성을 해치지 않는 안전한 기본값
+3. **검증 및 폴백**: 설정 검증 및 안전한 폴백 메커니즘
+
+```python
+# 보안 설정 관리
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
+API_KEY_NAME = "X-API-Key"
+
+# 디버그 모드 비활성화 (프로덕션)
+DEBUG = os.getenv("RAG_DEBUG", "false").lower() == "true"
+```
+
+### 운영 보안 가이드라인
+
+#### 1. 정기 보안 점검
+- [ ] **월간**: API 키 로테이션
+- [ ] **분기별**: 보안 로그 분석
+- [ ] **반기별**: 취약점 스캔
+- [ ] **연간**: 포괄적 보안 감사
+
+#### 2. 접근 제어
+- [ ] 관리자 계정 분리
+- [ ] 최소 권한 원칙 적용
+- [ ] 정기적 권한 검토
+
+#### 3. 모니터링
+- [ ] 실시간 보안 이벤트 모니터링
+- [ ] 비정상 접근 패턴 탐지
+- [ ] 자동 알림 시스템
+
+### 보안 사고 대응 절차
+
+#### 1단계: 탐지 및 격리
+1. 보안 사고 확인
+2. 영향 범위 평가
+3. 시스템 격리 (필요시)
+
+#### 2단계: 분석 및 대응
+1. 로그 분석 및 근본 원인 파악
+2. 즉시 대응 조치 실행
+3. 추가 피해 방지
+
+#### 3단계: 복구 및 개선
+1. 시스템 복구
+2. 보안 강화 조치
+3. 재발 방지 계획 수립
+
+### 개발자 보안 체크리스트
+
+#### 코드 작성 시
+- [ ] 모든 사용자 입력 검증
+- [ ] SQL 인젝션 방지
+- [ ] XSS 공격 방지
+- [ ] CSRF 토큰 사용
+- [ ] 적절한 에러 처리
+
+#### 배포 전
+- [ ] 하드코딩된 비밀번호 제거
+- [ ] 디버그 모드 비활성화
+- [ ] 불필요한 라이브러리 제거
+- [ ] 보안 스캔 실행
+
+#### 운영 중
+- [ ] 정기 보안 패치
+- [ ] 로그 모니터링
+- [ ] 백업 및 복구 테스트
+- [ ] 인시던트 대응 계획 업데이트
+
+---
+
 > **작성자**: Claude Code  
-> **최종 수정**: 2024-01-22  
-> **버전**: 2.0 (상세 설계 추가)  
+> **최종 수정**: 2025-01-26  
+> **버전**: 3.0 (보안 가이드라인 추가)  
 > **다음 업데이트**: 구현 개선 시
