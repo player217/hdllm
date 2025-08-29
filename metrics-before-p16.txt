@@ -1,0 +1,6 @@
+# HELP rag_embed_seconds Embedding latency seconds
+# TYPE rag_embed_seconds histogram
+# HELP rag_cache_hits_total Cache hits
+# TYPE rag_cache_hits_total counter
+# HELP rag_cache_misses_total Cache misses
+# TYPE rag_cache_misses_total counter
