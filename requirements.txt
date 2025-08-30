@@ -8,6 +8,12 @@ pywin32==306
 python-multipart==0.0.6
 sentence-transformers
 transformers
+
+# Testing dependencies  
+pytest==7.4.3
+pytest-asyncio==0.21.1
+asgi-lifespan==2.1.0
+httpx==0.25.2
 sentencepiece
 tika
 openpyxl

@@ -1,0 +1,65 @@
+groups:
+- name: rag_service.rules
+  rules:
+  # RAG 서비스 에러율 모니터링
+  - alert: RAGHighErrorRate
+    expr: |
+      sum(rate(rag_rag_requests_total{result="error"}[5m]))
+      / sum(rate(rag_rag_requests_total[5m])) > 0.05
+    for: 10m
+    labels: 
+      severity: page
+      team: platform
+    annotations:
+      summary: "RAG 에러율 5% 초과 (10분간 지속)"
+      description: "{{ $value | humanizePercentage }} 에러율 감지"
+      
+  # /ask 엔드포인트 지연 모니터링
+  - alert: AskP95LatencyHigh
+    expr: |
+      histogram_quantile(0.95,
+        sum by (le) (rate(rag_http_request_duration_seconds_bucket{path="/ask"}[5m]))
+      ) > 2
+    for: 10m
+    labels: 
+      severity: warning
+      team: platform
+    annotations:
+      summary: "/ask P95 지연 2초 초과"
+      description: "현재 P95: {{ $value | humanizeDuration }}"
+      
+  # Qdrant 연결 문제
+  - alert: QdrantErrorSpike
+    expr: sum(rate(rag_qdrant_errors_total[5m])) > 0.1
+    for: 5m
+    labels: 
+      severity: critical
+      team: infra
+    annotations:
+      summary: "Qdrant 에러 스파이크 감지"
+      description: "5분간 분당 {{ $value }} 에러 발생"
+      
+  # 임베딩 캐시 효율성
+  - alert: EmbeddingCacheMissRateHigh
+    expr: |
+      sum(rate(rag_cache_misses_total{cache_type="embedding"}[5m]))
+      / (sum(rate(rag_cache_hits_total{cache_type="embedding"}[5m])) 
+         + sum(rate(rag_cache_misses_total{cache_type="embedding"}[5m]))) > 0.5
+    for: 15m
+    labels: 
+      severity: warning
+      team: platform
+    annotations:
+      summary: "임베딩 캐시 미스율 50% 초과"
+      description: "캐시 효율성 저하: {{ $value | humanizePercentage }} 미스"
+      
+  # 활성 연결 수 모니터링
+  - alert: ActiveConnectionsHigh
+    expr: rag_active_connections > 100
+    for: 5m
+    labels:
+      severity: warning
+      team: infra
+    annotations:
+      summary: "활성 연결 100개 초과"
+      description: "현재 연결: {{ $value }}"

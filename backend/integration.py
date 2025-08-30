@@ -5,6 +5,7 @@ Date: 2024-01-22
 Description: Integrates all Phase 3 components with main application
 """
 
+import os
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -21,8 +22,41 @@ from error_handlers import register_error_handlers
 from monitoring import monitoring_service, metrics_endpoint, MetricsMiddleware
 from api_documentation import custom_openapi
 from security_config import setup_security_middleware
+from security import SecurityHeadersMiddleware
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Security Configuration
+# =============================================================================
+
+def _parse_csv_env(name: str) -> list[str]:
+    """Parse comma-separated environment variable into list"""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return []
+    return [x.strip() for x in raw.split(",") if x.strip()]
+
+
+# CORS Configuration
+ALLOW_ORIGINS = _parse_csv_env("ALLOW_ORIGINS")
+if not ALLOW_ORIGINS:
+    # Default to localhost for development
+    ALLOW_ORIGINS = ["http://localhost:8001", "http://127.0.0.1:8001"]
+    logger.warning("ALLOW_ORIGINS not set, using default localhost values")
+
+ALLOW_METHODS = _parse_csv_env("ALLOW_METHODS")
+if not ALLOW_METHODS:
+    ALLOW_METHODS = ["GET", "POST", "OPTIONS"]
+
+ALLOW_HEADERS = _parse_csv_env("ALLOW_HEADERS")
+if not ALLOW_HEADERS:
+    ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Request-ID"]
+
+TRUSTED_HOSTS = _parse_csv_env("TRUSTED_HOSTS")
+if not TRUSTED_HOSTS:
+    TRUSTED_HOSTS = ["localhost", "127.0.0.1", "*.hdmipo.local"]
 
 
 # =============================================================================
@@ -85,20 +119,26 @@ def configure_phase3_app(app: FastAPI, enable_security: bool = True) -> FastAPI:
         setup_security_middleware(app)
         logger.info("Security middleware enabled")
     
-    # CORS middleware
+    # CORS middleware (secure configuration)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Configure appropriately for production
+        allow_origins=ALLOW_ORIGINS,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=ALLOW_METHODS,
+        allow_headers=ALLOW_HEADERS,
     )
+    logger.info(f"CORS configured with origins: {ALLOW_ORIGINS}")
     
     # Trusted host middleware
     app.add_middleware(
         TrustedHostMiddleware,
-        allowed_hosts=["*"]  # Configure appropriately for production
+        allowed_hosts=TRUSTED_HOSTS
     )
+    logger.info(f"Trusted hosts configured: {TRUSTED_HOSTS}")
+    
+    # Security headers middleware
+    app.add_middleware(SecurityHeadersMiddleware)
+    logger.info("Security headers middleware added")
     
     # Metrics middleware
     app.add_middleware(MetricsMiddleware)

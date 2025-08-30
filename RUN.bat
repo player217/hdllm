@@ -1,47 +1,141 @@
 @echo off
+setlocal ENABLEDELAYEDEXPANSION
 chcp 65001 >nul 2>&1
-setlocal
 
-:: --- PYTHONPATH í™˜ê²½ ë³€ìˆ˜ ì´ˆê¸°í™” ---
-set PYTHONPATH=
+REM HDÇö´ë¹ÌÆ÷ Gauss-1 RAG System - Enhanced Runner
+REM Version: 2.1 - Smart Port Detection & Process Management
+REM Date: 2025-01-30
 
-title LLMPY Vector Studio - RUN
+title HDÇö´ë¹ÌÆ÷ Gauss-1 RAG System
 
-echo ======================================================
-echo  Starting LLMPY Vector Studio...
-echo ======================================================
+echo ============================================================
+echo   HDÇö´ë¹ÌÆ÷ Gauss-1 RAG System - ½ÇÇà ÇÁ·Î±×·¥ v2.1
+echo ============================================================
 echo.
 
-:: --- 1. ìŠ¤í¬ë¦½íŠ¸ ë””ë ‰í† ë¦¬ë¡œ ì´ë™ ---
-cd /d "%~dp0"
-echo [INFO] Current directory: %cd%
-echo.
+REM ±âÁØ °æ·Î
+set ROOT=%~dp0
+cd /d "%ROOT%"
 
-:: --- 2. ê°€ìƒí™˜ê²½ í™•ì¸ ---
-echo [INFO] Checking for virtual environment...
-if not exist ".\venv\Scripts\python.exe" (
-    echo [FATAL ERROR] Virtual environment not found. Please run INSTALL.bat first.
+REM 1) °¡»óÈ¯°æ È°¼ºÈ­
+echo [1/5] °¡»óÈ¯°æ È®ÀÎ...
+if not exist "venv\Scripts\activate.bat" (
+    echo [ERROR] °¡»óÈ¯°æÀÌ ¾ø½À´Ï´Ù. ¸ÕÀú install.bat À» ½ÇÇàÇÏ¼¼¿ä.
     pause
-    exit /b
+    exit /b 1
 )
-echo   -^> Virtual environment check: PASSED
+call venv\Scripts\activate.bat
+echo    -^> °¡»óÈ¯°æ È°¼ºÈ­ ¿Ï·á
 echo.
 
-:: --- 3. íŒŒì´ì¬ ìŠ¤í¬ë¦½íŠ¸ ì§ì ‘ ì‹¤í–‰ ---
-echo [INFO] Running the Python GUI script...
-echo   -^> Command: venv\Scripts\python.exe src\HDLLM.py
-echo ------------------------------------------------------
+REM 2) ·ÎÄÃ Qdrant °¡µ¿(°³ÀÎ¿ë) - ÀÌ¹Ì ¶°ÀÖÀ¸¸é °Ç³Ê¶Ü
+echo [2/5] Qdrant º¤ÅÍ DB ½ÃÀÛ...
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":6333" ^| findstr "LISTENING"') do set QPID=%%p
+if not defined QPID (
+    if exist "bin\qdrant\qdrant.exe" (
+        start "Qdrant Server" /B "bin\qdrant\qdrant.exe" --storage-dir "%ROOT%storage\qdrant"
+        echo    -^> Qdrant ½ÃÀÛ Áß (Æ÷ÅÍºí ¹öÀü)...
+    ) else if exist "src\bin\qdrant.exe" (
+        start "Qdrant Server" /B "src\bin\qdrant.exe"
+        echo    -^> Qdrant ½ÃÀÛ Áß (±âÁ¸ °æ·Î)...
+    ) else (
+        echo    -^> Qdrant ½ÇÇà ÆÄÀÏ ¾øÀ½. ¼³Ä¡¸¦ È®ÀÎÇÏ¼¼¿ä.
+    )
+    timeout /t 3 /nobreak >nul
+) else (
+    echo    -^> Qdrant ÀÌ¹Ì ½ÇÇà Áß (PID: !QPID!)
+)
 echo.
 
-.\venv\Scripts\python.exe .\src\HDLLM.py
+REM 3) Ollama ¼­¹ö ½ÃÀÛ
+echo [3/5] Ollama LLM ¼­¹ö ½ÃÀÛ...
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":11434" ^| findstr "LISTENING"') do set OPID=%%p
+if not defined OPID (
+    where ollama >nul 2>&1
+    if !errorlevel! equ 0 (
+        start "Ollama Server" /B ollama serve
+        echo    -^> Ollama ½ÃÀÛ Áß...
+    ) else if exist "bin\ollama\ollama.exe" (
+        start "Ollama Server" /B "bin\ollama\ollama.exe" serve
+        echo    -^> Ollama ½ÃÀÛ Áß (Æ÷ÅÍºí ¹öÀü)...
+    ) else (
+        echo    -^> Ollama ¹Ì¼³Ä¡. LLM ±â´ÉÀÌ Á¦ÇÑµË´Ï´Ù.
+    )
+    timeout /t 3 /nobreak >nul
+) else (
+    echo    -^> Ollama ÀÌ¹Ì ½ÇÇà Áß (PID: !OPID!)
+)
+echo.
 
-if %errorlevel% neq 0 (
-    echo.
-    echo [ERROR] Python script exited with error code: %errorlevel%
-    echo.
+REM 4) ¹é¿£µå API ¼­¹ö ½ÃÀÛ
+echo [4/5] Backend API ¼­¹ö ½ÃÀÛ...
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8080" ^| findstr "LISTENING"') do set BPID=%%p
+if not defined BPID (
+    echo    -^> FastAPI ¼­¹ö ½ÃÀÛ Áß (Æ÷Æ® 8080)...
+    
+    REM .env ÆÄÀÏ È®ÀÎ
+    if exist ".env" (
+        start "Backend API" cmd /k "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload --env-file ..\.env"
+    ) else if exist ".env.test" (
+        start "Backend API" cmd /k "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload --env-file ..\.env.test"
+    ) else (
+        start "Backend API" cmd /k "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload"
+    )
+    
+    timeout /t 5 /nobreak >nul
+) else (
+    echo    -^> Backend API ÀÌ¹Ì ½ÇÇà Áß (PID: !BPID!)
+)
+echo.
+
+REM 5) ÇÁ·ÐÆ®¿£µå ¼­¹ö ½ÃÀÛ
+echo [5/5] Frontend À¥ ¼­¹ö ½ÃÀÛ...
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8001" ^| findstr "LISTENING"') do set FPID=%%p
+if not defined FPID (
+    echo    -^> À¥ ¼­¹ö ½ÃÀÛ Áß (Æ÷Æ® 8001)...
+    start "Frontend Server" cmd /k "cd frontend && python -m http.server 8001"
+    timeout /t 2 /nobreak >nul
+) else (
+    echo    -^> Frontend ÀÌ¹Ì ½ÇÇà Áß (PID: !FPID!)
+)
+echo.
+
+REM ¼±ÅÃ: GUI ¾ÖÇÃ¸®ÄÉÀÌ¼Ç ½ÃÀÛ
+echo GUI ¾ÖÇÃ¸®ÄÉÀÌ¼ÇÀ» ½ÃÀÛÇÏ½Ã°Ú½À´Ï±î? (Y/N)
+set /p RUNGUI=¼±ÅÃ: 
+if /i "!RUNGUI!"=="Y" (
+    echo GUI ¾ÖÇÃ¸®ÄÉÀÌ¼Ç ½ÃÀÛ Áß...
+    start "GUI Application" "%ROOT%venv\Scripts\pythonw.exe" "%ROOT%src\HDLLM.py"
 )
 
 echo.
-echo ------------------------------------------------------
-echo [DEBUG] Python script has finished. Press any key to exit.
-pause
+echo ============================================================
+echo   ? ¸ðµç ¼­ºñ½º°¡ ½ÃÀÛµÇ¾ú½À´Ï´Ù!
+echo ============================================================
+echo.
+echo Á¢¼Ó Á¤º¸:
+echo   ? À¥ ÀÎÅÍÆäÀÌ½º: http://localhost:8001
+echo   ? API ¼­¹ö: http://localhost:8080
+echo   ? API ¹®¼­: http://localhost:8080/docs
+echo   ? »óÅÂ È®ÀÎ: http://localhost:8080/status
+echo.
+echo µ¥ÀÌÅÍ ¼Ò½º:
+echo   ? °³ÀÎ Qdrant: 127.0.0.1:6333
+echo   ? ºÎ¼­ Qdrant: 10.150.104.37:6333
+echo.
+echo Á¾·á ¹æ¹ý:
+echo   ? ÀÌ Ã¢À» ´ÝÀ¸¸é GUI¸¸ Á¾·áµË´Ï´Ù
+echo   ? ¸ðµç ¼­ºñ½º Á¾·á: kill.bat ½ÇÇà
+echo.
+
+REM ºê¶ó¿ìÀú ¿­±â
+echo ºê¶ó¿ìÀú¸¦ ¿©½Ã°Ú½À´Ï±î? (Y/N)
+set /p OPENBROWSER=¼±ÅÃ: 
+if /i "!OPENBROWSER!"=="Y" (
+    start http://localhost:8001
+)
+
+echo.
+echo [´ë±â Áß] ¾Æ¹« Å°³ª ´©¸£¸é Á¾·áÇÕ´Ï´Ù...
+pause >nul
+exit /b 0

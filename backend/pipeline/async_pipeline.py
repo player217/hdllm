@@ -22,7 +22,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from .dlq import DeadLetterQueue, DLQEntry
-from resource_manager import ResourceManager
+from .task_queue import TaskQueue, QueueTask, TaskStatus
+from backend.resource_manager import ResourceManager
 
 logger = logging.getLogger(__name__)
 
@@ -192,22 +193,33 @@ class AsyncPipeline:
     
     def __init__(
         self,
+        resource_manager: Optional[ResourceManager] = None,
         dlq_path: str = "data/dlq.jsonl",
         batch_size: int = DEFAULT_BATCH_SIZE,
-        max_concurrent: int = 10
+        max_concurrent: int = 10,
+        max_queue_size: int = 1000
     ):
         """
         Initialize async pipeline
         
         Args:
+            resource_manager: ResourceManager instance for GPU acceleration
             dlq_path: Path to DLQ file
             batch_size: Default batch size for processing
             max_concurrent: Maximum concurrent tasks
+            max_queue_size: Maximum queue size for TaskQueue
         """
+        self.resource_manager = resource_manager
         self.dlq = DeadLetterQueue(dlq_path)
         self.batch_size = min(batch_size, MAX_BATCH_SIZE)
         self.max_concurrent = max_concurrent
         self.semaphore = asyncio.Semaphore(max_concurrent)
+        
+        # Initialize TaskQueue
+        self.task_queue = TaskQueue(max_workers=max_concurrent, max_queue_size=max_queue_size)
+        
+        # Register task handlers
+        self._register_task_handlers()
         
         # Track processed tasks for idempotency
         self.processed_tasks = set()
@@ -225,7 +237,77 @@ class AsyncPipeline:
             "dlq_tasks": 0
         }
         
-        logger.info(f"🚀 AsyncPipeline initialized with batch_size={batch_size}, max_concurrent={max_concurrent}")
+        logger.info(f"🚀 AsyncPipeline initialized with batch_size={batch_size}, max_concurrent={max_concurrent}, queue_size={max_queue_size}")
+    
+    def _register_task_handlers(self):
+        """작업 유형별 핸들러 등록"""
+        self.task_queue.register_handler("search", self._handle_search_task)
+        self.task_queue.register_handler("ingest", self._handle_ingest_task)
+        self.task_queue.register_handler("batch_upsert", self._handle_batch_upsert_task)
+        self.task_queue.register_handler("embed", self._handle_embed_task)
+        self.task_queue.register_handler("replay", self._handle_replay_task)
+    
+    async def _handle_search_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """검색 작업 핸들러"""
+        return await self.run_search(**payload)
+    
+    async def _handle_ingest_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """문서 수집 작업 핸들러 (향후 구현)"""
+        # TODO: 문서 수집 로직 구현
+        await asyncio.sleep(0.1)  # 임시
+        return {"status": "ingested", "document_id": payload.get("document_id")}
+    
+    async def _handle_batch_upsert_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """배치 업서트 작업 핸들러 (향후 구현)"""
+        # TODO: 배치 업서트 로직 구현
+        await asyncio.sleep(0.1)  # 임시
+        return {"status": "upserted", "vector_count": len(payload.get("vectors", []))}
+    
+    async def _handle_embed_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """임베딩 작업 핸들러"""
+        if not self.resource_manager:
+            raise ValueError("ResourceManager not available for embedding")
+        
+        texts = [payload.get("text", "")]
+        embeddings = await self.resource_manager.embed_texts(texts)
+        
+        return {
+            "embedding": embeddings[0],
+            "document_id": payload.get("document_id"),
+            "chunk_idx": payload.get("chunk_idx")
+        }
+    
+    async def _handle_replay_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """DLQ 재실행 작업 핸들러"""
+        # 기존 페이로드를 다시 실행
+        original_task_type = payload.get("original_task_type", "search")
+        if original_task_type in ["search", "ingest", "batch_upsert", "embed"]:
+            handler = getattr(self, f"_handle_{original_task_type}_task")
+            return await handler(payload)
+        else:
+            raise ValueError(f"Unknown task type for replay: {original_task_type}")
+    
+    async def start_queue(self):
+        """큐 시스템 시작"""
+        await self.task_queue.start()
+        logger.info("🚀 TaskQueue started")
+    
+    async def stop_queue(self, timeout: float = 30.0):
+        """큐 시스템 종료"""
+        await self.task_queue.stop(timeout=timeout)
+        logger.info("🛑 TaskQueue stopped")
+    
+    async def get_task_status(self, task_id: str) -> Optional[QueueTask]:
+        """작업 상태 조회"""
+        return await self.task_queue.get_task_status(task_id)
+    
+    async def cancel_task(self, task_id: str) -> bool:
+        """작업 취소"""
+        return await self.task_queue.cancel_task(task_id)
+    
+    def get_queue_stats(self) -> Dict[str, Any]:
+        """큐 통계 반환"""
+        return self.task_queue.get_stats()
     
     async def process_batch(
         self,
@@ -412,8 +494,11 @@ class AsyncPipeline:
     
     def get_stats(self) -> Dict[str, Any]:
         """Get pipeline statistics"""
+        queue_stats = self.get_queue_stats()
+        
         return {
             **self.stats,
+            "queue_stats": queue_stats,
             "dlq_stats": self.dlq.get_stats(),
             "processed_tasks_count": len(self.processed_tasks)
         }
@@ -465,3 +550,158 @@ class AsyncPipeline:
             "success": success_count,
             "failed": len(results["failed"])
         }
+    
+    async def run_search(
+        self,
+        query: str,
+        source_type: str = "mail",
+        limit: int = 10,
+        score_threshold: float = 0.3
+    ) -> Dict[str, Any]:
+        """
+        GPU 가속 검색 실행 (ResourceManager 통합)
+        
+        Args:
+            query: 검색 쿼리
+            source_type: 소스 타입 ('mail' or 'doc')
+            limit: 결과 제한
+            score_threshold: 유사도 임계값
+            
+        Returns:
+            검색 결과 및 메타데이터
+        """
+        if not self.resource_manager:
+            raise ValueError("ResourceManager not available for GPU acceleration")
+        
+        try:
+            start_time = time.time()
+            
+            # GPU 가속 임베딩 생성
+            logger.info(f"🔍 Generating embeddings for query: {query[:50]}...")
+            query_embeddings = await self.resource_manager.embed_texts([query])
+            query_vector = query_embeddings[0]
+            
+            embed_time = time.time() - start_time
+            logger.info(f"⚡ GPU embedding generated in {embed_time:.3f}s")
+            
+            # 벡터 검색
+            search_start = time.time()
+            
+            results = await self.resource_manager.search_vectors(
+                source_type=source_type,
+                query_vector=query_vector,
+                limit=limit,
+                score_threshold=score_threshold,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            search_time = time.time() - search_start
+            total_time = time.time() - start_time
+            
+            logger.info(f"🎯 Search completed: {len(results)} results in {search_time:.3f}s (total: {total_time:.3f}s)")
+            
+            return {
+                "query": query,
+                "results": results,
+                "metadata": {
+                    "source_type": source_type,
+                    "result_count": len(results),
+                    "embed_time_ms": round(embed_time * 1000, 2),
+                    "search_time_ms": round(search_time * 1000, 2),
+                    "total_time_ms": round(total_time * 1000, 2),
+                    "device": self.resource_manager.embed_device,
+                    "backend": self.resource_manager.embed_backend
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Search failed: {e}")
+            self.stats["failed_tasks"] += 1
+            raise
+    
+    async def enqueue(
+        self, 
+        task_type: str,
+        payload: Dict[str, Any],
+        priority: int = 0
+    ) -> str:
+        """
+        비동기 작업 큐에 작업 추가 (진정한 큐잉)
+        
+        Args:
+            task_type: 작업 타입 ('search', 'ingest', 'batch_upsert', 'embed')
+            payload: 작업 데이터
+            priority: 작업 우선순위 (높을수록 우선)
+            
+        Returns:
+            작업 ID
+        """
+        # QueueTask 생성
+        queue_task = QueueTask(
+            task_id=f"{task_type}_{int(time.time()*1000)}",
+            task_type=task_type,
+            payload=payload,
+            priority=priority
+        )
+        
+        try:
+            # TaskQueue에 작업 추가
+            task_id = await self.task_queue.enqueue(queue_task)
+            logger.info(f"📤 Task enqueued: {task_id} ({task_type}) [Priority: {priority}]")
+            
+            # 통계 업데이트
+            self.stats["total_tasks"] += 1
+            
+            return task_id
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to enqueue task: {e}")
+            
+            # DLQ에 추가 (큐 오류 시)
+            dlq_entry = DLQEntry(
+                task_id=queue_task.task_id,
+                payload=payload,
+                error=str(e),
+                attempt=0,
+                timestamp=time.time(),
+                error_type=type(e).__name__,
+                stack_trace=traceback.format_exc()
+            )
+            self.dlq.push(dlq_entry)
+            self.stats["dlq_tasks"] += 1
+            
+            raise ValueError(f"Queue is full or unavailable: {e}")
+    
+    async def enqueue_batch(
+        self,
+        tasks: List[Dict[str, Any]],
+        default_priority: int = 0
+    ) -> List[str]:
+        """
+        여러 작업을 배치로 큐에 추가
+        
+        Args:
+            tasks: 작업 목록 [{"task_type": str, "payload": dict, "priority": int}]
+            default_priority: 기본 우선순위
+            
+        Returns:
+            작업 ID 목록
+        """
+        task_ids = []
+        
+        for task_info in tasks:
+            task_type = task_info["task_type"]
+            payload = task_info["payload"]
+            priority = task_info.get("priority", default_priority)
+            
+            try:
+                task_id = await self.enqueue(task_type, payload, priority)
+                task_ids.append(task_id)
+            except Exception as e:
+                logger.error(f"Failed to enqueue batch task {task_type}: {e}")
+                # 실패한 작업은 None으로 표시
+                task_ids.append(None)
+        
+        logger.info(f"📦 Batch enqueued: {len(task_ids)} tasks, {sum(1 for t in task_ids if t)} successful")
+        return task_ids

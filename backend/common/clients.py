@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional, Generator, AsyncGenerator
 from abc import ABC, abstractmethod
 import aiohttp
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct, SearchResult
+from qdrant_client.models import PointStruct
 import sys
 import os
 

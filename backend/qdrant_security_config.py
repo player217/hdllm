@@ -243,17 +243,42 @@ def create_secure_qdrant_clients(config: QdrantSecurityConfig) -> Dict[str, Secu
     
     return clients
 
-# 기본 보안 설정
-DEFAULT_SECURITY_CONFIG = QdrantSecurityConfig(
-    collection_namespaces={
-        "mail": "mail_my_documents",
-        "doc": "doc_my_documents"
-    },
-    allowed_sources=["mail", "doc"],
-    max_search_limit=10,
-    max_timeout=30.0,
-    enable_ssl=False,  # 로컬 환경에서는 비활성화
-    api_key=None,      # 환경변수에서 로드하려면 os.getenv('QDRANT_API_KEY')
-    audit_logging=True,
-    sensitive_fields=["text", "embedding", "content", "original_text"]
-)
+# 동적 보안 설정 생성 함수
+def create_default_security_config(resource_manager=None):
+    """ResourceManager를 사용하여 동적으로 보안 설정을 생성합니다."""
+    collection_namespaces = {}
+    
+    if resource_manager:
+        try:
+            # ResourceManager를 통한 동적 컬렉션명 생성
+            collection_namespaces = {
+                "mail": resource_manager.get_default_collection_name("mail", "my_documents"),
+                "doc": resource_manager.get_default_collection_name("doc", "my_documents")
+            }
+        except Exception as e:
+            logger.warning(f"Failed to get collection names from ResourceManager: {e}")
+            # Fallback to legacy naming
+            collection_namespaces = {
+                "mail": "mail_my_documents",
+                "doc": "doc_my_documents"
+            }
+    else:
+        # Legacy fallback when ResourceManager is not available
+        collection_namespaces = {
+            "mail": "mail_my_documents",
+            "doc": "doc_my_documents"
+        }
+    
+    return QdrantSecurityConfig(
+        collection_namespaces=collection_namespaces,
+        allowed_sources=["mail", "doc"],
+        max_search_limit=10,
+        max_timeout=30.0,
+        enable_ssl=False,  # 로컬 환경에서는 비활성화
+        api_key=None,      # 환경변수에서 로드하려면 os.getenv('QDRANT_API_KEY')
+        audit_logging=True,
+        sensitive_fields=["text", "embedding", "content", "original_text"]
+    )
+
+# 기본 보안 설정 (Legacy fallback)
+DEFAULT_SECURITY_CONFIG = create_default_security_config()

@@ -1,0 +1,46 @@
+{
+  "timestamp": "2025-08-26T17:58:31.347217",
+  "tests": [
+    {
+      "name": "ResourceManager Import",
+      "status": "passed",
+      "message": "Successfully imported and initialized"
+    },
+    {
+      "name": "startup_vector_dim_check method",
+      "status": "passed",
+      "message": "Method exists with 10 required fields"
+    },
+    {
+      "name": "Status Value Alignment",
+      "status": "passed",
+      "message": "All values present: ['success', 'warning', 'error']"
+    },
+    {
+      "name": "qdrant_pools attribute",
+      "status": "passed",
+      "message": "Fallback mechanism available"
+    },
+    {
+      "name": "clients attribute support",
+      "status": "passed",
+      "message": "Primary path available"
+    },
+    {
+      "name": "Embedder Guard Removal",
+      "status": "passed",
+      "message": "Guard removed for Ollama support"
+    },
+    {
+      "name": "Collection Naming Helper",
+      "status": "passed",
+      "message": "Mail: default_dev_mail_my_documents, Doc: default_dev_doc_my_documents"
+    }
+  ],
+  "summary": {
+    "total": 7,
+    "passed": 7,
+    "failed": 0,
+    "skipped": 0
+  }
+}

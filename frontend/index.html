@@ -578,6 +578,47 @@
         .status-indicator.error {
             background: var(--error);
         }
+        
+        /* Qdrant Status Badges */
+        .qdrant-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: help;
+            transition: all 0.2s ease;
+            min-width: 32px;
+            text-align: center;
+        }
+        
+        /* Badge states */
+        .qdrant-badge.ok {
+            background: var(--success);
+            color: white;
+        }
+        
+        .qdrant-badge.warn {
+            background: #f59e0b;
+            color: white;
+        }
+        
+        .qdrant-badge.fail {
+            background: var(--error);
+            color: white;
+        }
+        
+        .qdrant-badge.unknown {
+            background: var(--border-light);
+            color: var(--text-secondary);
+        }
+        
+        .qdrant-badge:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
 
         /* Mobile Menu Toggle */
         .mobile-menu-toggle {
@@ -1134,8 +1175,10 @@
                             <span>백엔드</span>
                         </div>
                         <div class="status-item">
-                            <span class="status-indicator"></span>
-                            <span>Qdrant</span>
+                            <span class="qdrant-badge personal" id="qdrant-personal" title="개인 Qdrant (127.0.0.1:6333)">개인</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="qdrant-badge dept" id="qdrant-dept" title="부서 Qdrant (10.150.104.37:6333)">부서</span>
                         </div>
                         <div class="status-item">
                             <span class="status-indicator"></span>
@@ -1189,11 +1232,11 @@
                 <div class="input-wrapper">
                     <!-- Source Selector -->
                     <div class="source-selector">
-                        <button class="source-btn active" data-source="mail" onclick="selectSource('mail')">
-                            개인메일
+                        <button class="source-btn active" data-source="mail" data-scope="personal" onclick="selectSource('mail', 'personal')">
+                            📧 개인 데이터
                         </button>
-                        <button class="source-btn" data-source="doc" onclick="selectSource('doc')">
-                            부서서버
+                        <button class="source-btn" data-source="mail" data-scope="dept" onclick="selectSource('mail', 'dept')">
+                            🏢 부서 데이터
                         </button>
                     </div>
                     
@@ -1224,6 +1267,7 @@
         const BACKEND_BASE = 'http://localhost:8080';
         const APP_VERSION = '1.0.4'; // Increment this when changes are made
         let currentSource = 'mail';
+        let currentScope = 'personal';  // Global scope tracking
         let isStreaming = false;
         let abortController = null;
         let statusTimer = null; // Global timer for status polling
@@ -1867,12 +1911,20 @@
             }
         }
 
-        // Source Selection
-        function selectSource(source) {
+        // Source Selection with Scope
+        function selectSource(source, scope) {
             currentSource = source;
+            currentScope = scope;
+            
+            // Update button states
             document.querySelectorAll('.source-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.source === source);
+                const isActive = btn.dataset.source === source && btn.dataset.scope === scope;
+                btn.classList.toggle('active', isActive);
             });
+            
+            // Update status display
+            const statusText = scope === 'personal' ? '개인 DB 사용중' : '부서 DB 사용중';
+            toastManager.show(`데이터 소스 변경: ${statusText}`, 'info');
         }
 
         // Polling Control Utilities
@@ -2033,18 +2085,54 @@
             const indicators = document.querySelectorAll('.status-indicator');
             // backend 키가 없으면 fastapi 키를 확인
             const okBackend = (status.backend ?? status.fastapi ?? false);
-            const qdrantOk = status.qdrant_mail || status.qdrant_doc;
             
+            // Update backend indicator (first indicator)
             indicators[0].classList.toggle('error', !okBackend);
-            indicators[1].classList.toggle('error', !qdrantOk);
-            indicators[2].classList.toggle('error', !status.ollama);
             
-            // Check if Qdrant is not running and show warning
-            if (!qdrantOk && !document.querySelector('.qdrant-warning')) {
-                showQdrantWarning();
-            } else if (qdrantOk && document.querySelector('.qdrant-warning')) {
-                hideQdrantWarning();
+            // Update Ollama indicator (last indicator)
+            if (indicators.length > 1) {
+                indicators[indicators.length - 1].classList.toggle('error', !status.ollama);
             }
+            
+            // Update Qdrant badges
+            updateQdrantStatus(status);
+        }
+        
+        function updateQdrantStatus(status) {
+            const personalBadge = document.getElementById('qdrant-personal');
+            const deptBadge = document.getElementById('qdrant-dept');
+            
+            if (personalBadge && deptBadge) {
+                // Update personal Qdrant status
+                updateBadgeStatus(personalBadge, status.qdrant?.personal?.status || 'unknown', {
+                    host: '127.0.0.1:6333',
+                    name: '개인 Qdrant'
+                });
+                
+                // Update department Qdrant status  
+                updateBadgeStatus(deptBadge, status.qdrant?.dept?.status || 'unknown', {
+                    host: '10.150.104.37:6333', 
+                    name: '부서 Qdrant'
+                });
+            }
+        }
+        
+        function updateBadgeStatus(badge, status, info) {
+            // Remove all status classes
+            badge.classList.remove('ok', 'warn', 'fail', 'unknown');
+            
+            // Add appropriate status class
+            badge.classList.add(status);
+            
+            // Update tooltip
+            const statusText = {
+                'ok': '연결됨',
+                'warn': '경고',
+                'fail': '연결 실패', 
+                'unknown': '상태 불명'
+            };
+            
+            badge.title = `${info.name} (${info.host}): ${statusText[status]}`;
         }
 
         function showQdrantWarning() {
@@ -2276,10 +2364,11 @@
                     }
                 }, TIMEOUT_DURATION);
                 
-                const response = await fetch(`${BACKEND_BASE}/ask`, {
+                const response = await fetch(`${BACKEND_BASE}/ask?db_scope=${currentScope}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'X-Qdrant-Scope': currentScope  // Include scope in header for dual routing
                     },
                     body: JSON.stringify({
                         question: question,
@@ -2288,6 +2377,20 @@
                     }),
                     signal: abortController.signal
                 });
+                
+                // Check response headers for scope and fallback information
+                const usedScope = response.headers.get('x-used-scope');
+                const fallbackUsed = response.headers.get('x-fallback-used');
+                
+                // Show toast notifications for scope changes or fallbacks
+                if (usedScope && usedScope !== currentScope) {
+                    const scopeText = usedScope === 'personal' ? '개인 DB' : '부서 DB';
+                    toastManager.show(`요청이 ${scopeText}로 처리되었습니다.`, 'warning');
+                }
+                
+                if (fallbackUsed === 'true') {
+                    toastManager.show('부서 DB 연결 실패로 개인 DB를 사용했습니다.', 'warning');
+                }
                 
                 if (!response.ok) {
                     let errorMessage = `서버 오류 (${response.status})`;

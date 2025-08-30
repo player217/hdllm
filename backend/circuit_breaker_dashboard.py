@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import HTMLResponse
-from resource_manager import get_resource_manager
+from backend.resource_manager import get_resource_manager
 
 logger = logging.getLogger(__name__)
 
