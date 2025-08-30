@@ -34,6 +34,16 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QIcon, QAction
 
+# 사용자 탭 UI - 임시 비활성화 (안정성 우선)
+UserTab = None
+# try:
+#     from ui_user_tab import UserTab
+#     print("사용자 탭 활성화됨")
+# except ImportError as e:
+#     print(f"Warning: Could not import UserTab: {e}")
+#     print("사용자 탭이 비활성화됩니다.")
+#     UserTab = None
+
 # 기능 구현을 위한 라이브러리
 try:
     from tika import parser as tika_parser
@@ -433,12 +443,77 @@ class LLMToolApp(QMainWindow):
     def init_ui(self):
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
+        
+        # 사용자 탭 (첫 번째) - UserTab이 사용 가능한 경우에만
+        if UserTab is not None:
+            try:
+                self.user_tab = UserTab(self)
+                self._connect_user_tab_signals()
+                self.tabs.addTab(self.user_tab, "👤 사용자")
+                
+                # 초기 설정 로드
+                self._initialize_user_tab_data()
+            except Exception as e:
+                print(f"사용자 탭 생성 중 오류: {e}")
+                self.user_tab = None
+        else:
+            self.user_tab = None
+            print("사용자 탭을 사용할 수 없습니다.")
+        
+        # 기존 탭들
+        tab_suffix = " (개발용)" if UserTab is not None else ""
         self.mail_app_tab = MailEmbeddingApp(self)
         self.doc_app_tab = DocumentEmbeddingApp(self)
         self.settings_tab = SettingsTab(self)
-        self.tabs.addTab(self.mail_app_tab, "  메일 임베딩")
-        self.tabs.addTab(self.doc_app_tab, "📄 문서 임베딩")
+        self.tabs.addTab(self.mail_app_tab, f"📧 메일 임베딩{tab_suffix}")
+        self.tabs.addTab(self.doc_app_tab, f"📄 문서 임베딩{tab_suffix}")
         self.tabs.addTab(self.settings_tab, "⚙️ 설정")
+
+    def _connect_user_tab_signals(self):
+        """사용자 탭 시그널들을 기존 로직과 연결"""
+        if self.user_tab is not None:
+            self.user_tab.qdrantPathChanged.connect(self.onQdrantPathChanged)
+            self.user_tab.outlookLiveToggled.connect(self.onOutlookLiveToggled)
+            self.user_tab.embedFromPathRequested.connect(self.onEmbedFromPath)
+            self.user_tab.embedResumeRequested.connect(self.onEmbedResume)
+            self.user_tab.embedFreshRequested.connect(self.onEmbedFresh)
+            self.user_tab.embedRestoreRequested.connect(self.onEmbedRestore)
+            self.user_tab.runWholeAppRequested.connect(self.onRunWholeApp)
+    
+    def _initialize_user_tab_data(self):
+        """사용자 탭 초기 데이터 설정"""
+        if self.user_tab is not None:
+            # 설정에서 Qdrant 경로 로드
+            config = self.load_config()
+            qdrant_path = config.get('mail_qdrant_path', '')
+            self.user_tab.setQdrantPath(qdrant_path)
+            
+            # 초기 상태 설정
+            self.user_tab.setStatus(backend="unknown", qdrant="unknown", outlook="fail")
+            
+            # 주기적 상태 업데이트 (5초마다)
+            self.status_timer = QTimer()
+            self.status_timer.timeout.connect(self._update_user_tab_status)
+            self.status_timer.start(5000)
+    
+    def _update_user_tab_status(self):
+        """사용자 탭 상태 배지 업데이트"""
+        if self.user_tab is not None:
+            # Backend 상태 체크
+            backend_status = "unknown"
+            try:
+                response = requests.get("http://127.0.0.1:8080/health", timeout=2)
+                backend_status = "ok" if response.status_code == 200 else "fail"
+            except:
+                backend_status = "fail"
+            
+            # Qdrant 상태 체크
+            qdrant_status = "ok" if (self.qdrant_client and self.qdrant_process and self.qdrant_process.poll() is None) else "fail"
+            
+            # Outlook 상태 체크 (라이브 연결 상태)
+            outlook_status = "ok" if hasattr(self, 'outlook_namespace') and self.outlook_namespace else "fail"
+            
+            self.user_tab.setStatus(backend=backend_status, qdrant=qdrant_status, outlook=outlook_status)
 
     def load_models(self):
         try:
@@ -492,7 +567,122 @@ class LLMToolApp(QMainWindow):
             except:
                 self.hosting_process.kill()
         
+        # 타이머 정리
+        if hasattr(self, 'status_timer'):
+            self.status_timer.stop()
+        
         event.accept()
+
+    # ========== 사용자 탭 시그널 핸들러들 ==========
+    def onQdrantPathChanged(self, path: str):
+        """사용자 탭에서 Qdrant 경로 변경 시 호출"""
+        config = self.load_config()
+        config['mail_qdrant_path'] = path
+        self.save_config(config)
+        logging.info(f"Qdrant 경로 변경: {path}")
+    
+    def onOutlookLiveToggled(self, enabled: bool):
+        """라이브 Outlook 토글 시 호출"""
+        if enabled:
+            # Outlook 연결 시도
+            try:
+                import win32com.client
+                outlook = win32com.client.Dispatch("Outlook.Application")
+                self.outlook_namespace = outlook.GetNamespace("MAPI")
+                
+                # 현재 계정 정보 표시
+                try:
+                    current_user = self.outlook_namespace.CurrentUser
+                    self.user_tab.setOutlookAccount(current_user.Name if hasattr(current_user, 'Name') else str(current_user))
+                except:
+                    self.user_tab.setOutlookAccount("연결됨")
+                
+                # 메일 목록 로드 (간단하게 받은편지함 최근 20개)
+                self._load_recent_mails()
+                
+            except Exception as e:
+                logging.error(f"Outlook 연결 실패: {e}")
+                self.user_tab.setOutlookAccount("연결 실패")
+        else:
+            self.outlook_namespace = None
+            self.user_tab.setOutlookAccount("미연결")
+            self.user_tab.setMailList([])
+    
+    def _load_recent_mails(self):
+        """최근 메일 20개 로드"""
+        try:
+            if not self.outlook_namespace:
+                return
+            
+            inbox = self.outlook_namespace.GetDefaultFolder(6)  # olFolderInbox
+            messages = inbox.Items
+            messages.Sort("[ReceivedTime]", True)  # 최신 순
+            
+            mail_items = []
+            count = 0
+            for msg in messages:
+                if count >= 20:  # 최대 20개
+                    break
+                try:
+                    if hasattr(msg, 'Subject') and hasattr(msg, 'SenderName'):
+                        subject = msg.Subject or "(제목 없음)"
+                        sender = msg.SenderName or "(발신자 없음)"
+                        entry_id = msg.EntryID
+                        mail_items.append((entry_id, subject, sender))
+                        count += 1
+                except:
+                    continue
+            
+            self.user_tab.setMailList(mail_items)
+            
+        except Exception as e:
+            logging.error(f"메일 목록 로드 실패: {e}")
+    
+    def onEmbedFromPath(self, dir_path: str):
+        """선택한 경로에서 임베딩 시작"""
+        # 기존 로직을 활용하여 폴더 임베딩 수행
+        if not self.qdrant_client:
+            config = self.load_config()
+            qdrant_path = config.get('mail_qdrant_path', '')
+            if qdrant_path:
+                self.start_qdrant('mail', qdrant_path)
+                time.sleep(2)  # Qdrant 시작 대기
+        
+        # 메일 임베딩 탭의 로직 활용
+        self.mail_app_tab.msg_path_display.setText(dir_path)
+        self.mail_app_tab.start_processing()
+    
+    def onEmbedResume(self):
+        """임베딩 이어하기"""
+        # 메일 임베딩 탭에서 진행 중인 작업 이어서 수행
+        if hasattr(self.mail_app_tab, 'start_processing'):
+            self.mail_app_tab.start_processing(resume=True)
+        else:
+            QMessageBox.information(self, "알림", "이어할 작업이 없습니다.")
+    
+    def onEmbedFresh(self):
+        """새로운 임베딩 시작"""
+        # 기존 벡터 DB 초기화 후 새로 시작
+        if hasattr(self.mail_app_tab, 'clear_qdrant_and_start'):
+            self.mail_app_tab.clear_qdrant_and_start()
+        else:
+            QMessageBox.information(self, "알림", "새로운 임베딩을 시작합니다.")
+            self.onEmbedFromPath(self.mail_app_tab.msg_path_display.text())
+    
+    def onEmbedRestore(self):
+        """임베딩 기록 복구"""
+        # 로그 파일에서 진행 상황 복구
+        QMessageBox.information(self, "알림", "임베딩 로그에서 기록을 복구합니다.")
+        # 기존 로그 파일 분석 로직 추가 가능
+    
+    def onRunWholeApp(self):
+        """전체 앱 실행 (Qdrant + Backend + Frontend)"""
+        # 메일용 전체 앱 실행 로직 활용
+        if hasattr(self.mail_app_tab, 'run_hosting_script'):
+            self.mail_app_tab.run_hosting_script()
+        else:
+            QMessageBox.information(self, "알림", "전체 앱 실행을 시작합니다.")
+    # ========== End 사용자 탭 시그널 핸들러들 ==========
 
     def start_qdrant(self, service_type: str, path: str):
         if self.qdrant_process:

@@ -1,0 +1,39 @@
+{
+    "fastapi": true,
+    "ollama": true,
+    "qdrant_mail": false,
+    "qdrant_doc": false,
+    "security_clients": {
+        "secure_mail": {
+            "connected": false,
+            "collection_exists": false,
+            "namespace": "default_dev_mail_my_documents",
+            "vectors_count": 0,
+            "security_enabled": true
+        },
+        "secure_doc": {
+            "connected": false,
+            "collection_exists": false,
+            "namespace": "default_dev_doc_my_documents",
+            "vectors_count": 0,
+            "security_enabled": true
+        }
+    },
+    "security_config": {
+        "namespaces_configured": 2,
+        "allowed_sources": [
+            "mail",
+            "doc"
+        ],
+        "max_search_limit": 10,
+        "audit_logging": true,
+        "ssl_enabled": false
+    },
+    "namespace_separation": {
+        "mail": "default_dev_mail_my_documents",
+        "doc": "default_dev_doc_my_documents"
+    },
+    "timestamp": "2025-08-27T08:29:40.969752",
+    "version": "2.0.0-security",
+    "phase": "2A-0 \u8e42\ub301\ube1e\uca0c\u907a\uafa8\u2501 \udcec\uaf55\u6028\udc84 \udcec\uc7fb\udcec\uc29c\udceb\ub9d6"
+}

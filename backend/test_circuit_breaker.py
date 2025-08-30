@@ -9,7 +9,7 @@ import asyncio
 import time
 import logging
 from typing import List
-from resource_manager import CircuitBreaker, ResourceConfig, CircuitBreakerState, RequestMetrics
+from backend.resource_manager import CircuitBreaker, ResourceConfig, CircuitBreakerState, RequestMetrics
 
 # 테스트용 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -215,7 +215,7 @@ class TestCircuitBreakerIntegration:
         """OllamaTokenBucket과의 통합 테스트"""
         logger.info("🧪 Testing Circuit Breaker integration with OllamaTokenBucket")
         
-        from resource_manager import OllamaTokenBucket
+        from backend.resource_manager import OllamaTokenBucket
         
         # OllamaTokenBucket 생성
         token_bucket = OllamaTokenBucket(self.config)

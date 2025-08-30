@@ -31,6 +31,7 @@ from backend.common.logging import (
     REQ_COUNT, REQ_LATENCY, RAG_REQ, EMBED_LAT, SEARCH_LAT, QDRANT_ERR,
     CACHE_HITS, CACHE_MISSES, ACTIVE_CONNECTIONS, LLM_TOKENS, prometheus_app
 )
+from backend.common.config_loader import get_config_loader, QdrantEndpoint
 
 # --------------------------------------------------------------------------
 # 1. Enhanced Logging Setup with PII Protection (P1-3)
@@ -71,6 +72,52 @@ except ImportError:
 
 class AppConfig:
     """애플리케이션 설정을 관리합니다."""
+    def __init__(self):
+        # Initialize config loader
+        self._config_loader = get_config_loader()
+        self._qdrant_endpoints = None
+        self._load_qdrant_endpoints()
+    
+    def _load_qdrant_endpoints(self):
+        """Load Qdrant endpoints from JSON configuration"""
+        try:
+            self._qdrant_endpoints = self._config_loader.get_qdrant_endpoints()
+            logger.info(f"✅ Loaded {len(self._qdrant_endpoints)} Qdrant endpoints from JSON config")
+        except Exception as e:
+            logger.error(f"❌ Failed to load Qdrant endpoints from JSON config: {e}")
+            self._qdrant_endpoints = {}
+    
+    def get_qdrant_endpoint(self, scope: str) -> QdrantEndpoint:
+        """Get Qdrant endpoint configuration for specific scope"""
+        if self._qdrant_endpoints and scope in self._qdrant_endpoints:
+            return self._qdrant_endpoints[scope]
+        
+        # Fallback to environment variables
+        logger.warning(f"⚠️ Using environment variable fallback for {scope} Qdrant endpoint")
+        if scope == 'personal':
+            return QdrantEndpoint(
+                host=os.getenv('QDRANT_PERSONAL_HOST', '127.0.0.1'),
+                port=int(os.getenv('QDRANT_PERSONAL_PORT', '6333')),
+                timeout=float(os.getenv('QDRANT_PERSONAL_TIMEOUT', '15.0')),
+                description='Personal Qdrant (env fallback)'
+            )
+        elif scope == 'dept':
+            return QdrantEndpoint(
+                host=os.getenv('QDRANT_DEPT_HOST', '10.150.104.37'),
+                port=int(os.getenv('QDRANT_DEPT_PORT', '6333')),
+                timeout=float(os.getenv('QDRANT_DEPT_TIMEOUT', '20.0')),
+                description='Department Qdrant (env fallback)'
+            )
+        else:
+            # Default fallback
+            return QdrantEndpoint(
+                host='127.0.0.1',
+                port=6333,
+                timeout=30.0,
+                description=f'Default Qdrant for {scope}'
+            )
+    
+    # Basic application settings
     EMBEDDING_MODEL_PATH: str = str(EMBEDDING_MODEL_DEFAULT_PATH)
     OLLAMA_API_URL: str = os.getenv("RAG_OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
     
@@ -78,7 +125,7 @@ class AppConfig:
     # Note: Collection names are now dynamically generated via ResourceManager.get_default_collection_name()
     # This provides centralized collection naming and better maintainability
     
-    # 레거시 호환성
+    # 레거시 호환성 (JSON 설정으로 대체 예정)
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
     QDRANT_SCORE_THRESHOLD: float = 0.30  # Lowered threshold to find more results
@@ -89,14 +136,36 @@ class AppConfig:
         "exact": False   # Use approximate search for speed
     }
     
-    # 분리된 Qdrant 인스턴스 설정 - 보안 강화
-    MAIL_QDRANT_HOST: str = os.getenv("RAG_MAIL_QDRANT_HOST", "127.0.0.1")
-    MAIL_QDRANT_PORT: int = int(os.getenv("RAG_MAIL_QDRANT_PORT", "6333"))
-    MAIL_QDRANT_TIMEOUT: float = 15.0  # 메일 검색용 단축 타임아웃
+    # 분리된 Qdrant 인스턴스 설정 - JSON 설정으로 대체됨
+    @property
+    def MAIL_QDRANT_HOST(self) -> str:
+        personal_ep = self.get_qdrant_endpoint('personal')
+        return personal_ep.host
     
-    DOC_QDRANT_HOST: str = os.getenv("RAG_DOC_QDRANT_HOST", "127.0.0.1")
-    DOC_QDRANT_PORT: int = int(os.getenv("RAG_DOC_QDRANT_PORT", "6333"))
-    DOC_QDRANT_TIMEOUT: float = 20.0   # 문서 검색용 타임아웃
+    @property
+    def MAIL_QDRANT_PORT(self) -> int:
+        personal_ep = self.get_qdrant_endpoint('personal')
+        return personal_ep.port
+        
+    @property
+    def MAIL_QDRANT_TIMEOUT(self) -> float:
+        personal_ep = self.get_qdrant_endpoint('personal')
+        return personal_ep.timeout
+    
+    @property
+    def DOC_QDRANT_HOST(self) -> str:
+        dept_ep = self.get_qdrant_endpoint('dept')
+        return dept_ep.host
+        
+    @property 
+    def DOC_QDRANT_PORT(self) -> int:
+        dept_ep = self.get_qdrant_endpoint('dept')
+        return dept_ep.port
+        
+    @property
+    def DOC_QDRANT_TIMEOUT(self) -> float:
+        dept_ep = self.get_qdrant_endpoint('dept')
+        return dept_ep.timeout
     
     DEFAULT_LLM_MODEL: str = "gemma3:4b"
     LLM_TIMEOUT: int = 60
@@ -256,6 +325,42 @@ async def lifespan(app: FastAPI):
         resource_manager = ResourceManager.from_env()
         app_state["resource_manager"] = resource_manager
         logger.info("🎛️ ResourceManager with GPU acceleration initialized")
+        
+        # Initialize QdrantRouter for dual routing with JSON configuration
+        from backend.common.qdrant_router import QdrantRouter, QdrantConfig
+        
+        # Get endpoints from JSON configuration
+        personal_endpoint = config.get_qdrant_endpoint('personal')
+        dept_endpoint = config.get_qdrant_endpoint('dept')
+        
+        logger.info(f"📍 Personal Qdrant: {personal_endpoint.host}:{personal_endpoint.port}")
+        logger.info(f"📍 Department Qdrant: {dept_endpoint.host}:{dept_endpoint.port}")
+        
+        router = QdrantRouter(
+            env_name=os.getenv("QDRANT_ENV", "dev"),
+            namespace_pattern=os.getenv(
+                "NAMESPACE_PATTERN",
+                "{scope}_{env}_{source}_my_documents"
+            ),
+            personal_cfg=QdrantConfig(
+                host=personal_endpoint.host,
+                port=personal_endpoint.port,
+                timeout=personal_endpoint.timeout,
+                scope="personal"
+            ),
+            dept_cfg=QdrantConfig(
+                host=dept_endpoint.host,
+                port=dept_endpoint.port,
+                timeout=dept_endpoint.timeout,
+                scope="dept"
+            ),
+            secure_factory=None  # Will use standard QdrantClient for now
+        )
+        
+        # Store in app state and pass to resource manager
+        app_state["qdrant_router"] = router
+        resource_manager.qdrant_router = router
+        logger.info("🔀 QdrantRouter initialized for dual routing (personal/dept)")
         
         # Phase 2A-1.5: 스타트업 컬렉션 검증 (Fail-Fast 원칙)
         try:
@@ -475,8 +580,23 @@ async def request_id_middleware(request: Request, call_next):
     elif "/doc" in str(request.url):
         source = "doc"
     
-    # Set context for logging
-    set_request_context(request_id, source, "-")
+    # Extract scope for dual routing (Header > Query > Default)
+    scope = (
+        request.headers.get("x-qdrant-scope") or
+        request.query_params.get("db_scope") or
+        os.getenv("DEFAULT_DB_SCOPE", "personal")
+    )
+    
+    # Validate scope
+    if scope not in ["personal", "dept"]:
+        logger.warning(f"Invalid scope '{scope}', falling back to personal")
+        scope = "personal"
+    
+    # Set context for logging with scope
+    set_request_context(request_id, source, "-", scope)
+    
+    # Add scope to request state for later use
+    request.state.scope = scope
     
     # P1-4: Track active connections
     ACTIVE_CONNECTIONS.inc()
@@ -488,6 +608,11 @@ async def request_id_middleware(request: Request, call_next):
         # Add correlation headers
         response.headers["x-request-id"] = request_id
         response.headers["x-response-source"] = source
+        response.headers["x-used-scope"] = scope  # Add scope for client verification
+        
+        # Add fallback header if fallback was used
+        if getattr(request.state, "fallback_used", False):
+            response.headers["x-fallback-used"] = "true"
         
         # P1-4: Record metrics
         duration = time.perf_counter() - start_time
@@ -619,7 +744,7 @@ async def stream_llm_response(prompt: str, model: str, request_id: str):
         logger.error(f"[{request_id}] LLM 스트리밍 실패: {e}")
         yield "답변 생성 중 오류가 발생했습니다."
 
-def search_qdrant(question: str, request_id: str, client: QdrantClient, config: AppConfig, source: str = "mail") -> tuple[str, list[dict]]:
+def search_qdrant(question: str, request_id: str, client: QdrantClient, config: AppConfig, source: str = "mail", request: Request = None) -> tuple[str, list[dict]]:
     """Qdrant에서 관련 문서를 검색합니다."""
     import time
     start_time = time.time()
@@ -715,7 +840,8 @@ def search_qdrant(question: str, request_id: str, client: QdrantClient, config: 
                             score_threshold=config.QDRANT_SCORE_THRESHOLD,
                             with_payload=True,
                             with_vectors=False,
-                            search_params=models.SearchParams(**config.QDRANT_SEARCH_PARAMS)
+                            search_params=models.SearchParams(**config.QDRANT_SEARCH_PARAMS),
+                            request=request
                         )
                     )
                 finally:
@@ -728,7 +854,8 @@ def search_qdrant(question: str, request_id: str, client: QdrantClient, config: 
                     score_threshold=config.QDRANT_SCORE_THRESHOLD,
                     with_payload=True,
                     with_vectors=False,
-                    search_params=models.SearchParams(**config.QDRANT_SEARCH_PARAMS)
+                    search_params=models.SearchParams(**config.QDRANT_SEARCH_PARAMS),
+                    request=request
                 )
             
             # P1-4: Record search latency
@@ -923,7 +1050,7 @@ def health_check():
 
 @app.get("/status")
 async def status():
-    """보안·분리 설계가 적용된 시스템 상태 확인"""
+    """보안·분리 설계가 적용된 시스템 상태 확인 (Dual Routing 포함)"""
     import asyncio
     import aiohttp
     
@@ -936,7 +1063,15 @@ async def status():
         except Exception:
             return False
     
-    # 기본 서비스 상태 확인
+    # Check if QdrantRouter is available for dual routing
+    router = app_state.get("qdrant_router")
+    if router:
+        # Get aggregated status from router
+        router_status = await router.get_aggregated_status()
+    else:
+        router_status = None
+    
+    # 기본 서비스 상태 확인 (legacy compatibility)
     ollama_url = config.OLLAMA_API_URL.replace("/api/chat", "/")
     qdrant_mail_url = f"http://{config.MAIL_QDRANT_HOST}:{config.MAIL_QDRANT_PORT}/"
     qdrant_doc_url = f"http://{config.DOC_QDRANT_HOST}:{config.DOC_QDRANT_PORT}/"
@@ -990,7 +1125,7 @@ async def status():
             "ssl_enabled": sec_config.enable_ssl
         }
     
-    return {
+    status_response = {
         # 기본 서비스 상태
         "fastapi": True,
         "ollama": basic_results[0] if not isinstance(basic_results[0], Exception) else False,
@@ -1007,6 +1142,12 @@ async def status():
         "version": "2.0.0-security",
         "phase": "2A-0 보안·분리 설계 적용됨"
     }
+    
+    # Add dual routing status if available
+    if router_status:
+        status_response.update(router_status)
+    
+    return status_response
 
 
 # --------------------------------------------------------------------------
@@ -1162,9 +1303,9 @@ async def open_mail(request: Request):
     raise HTTPException(status_code=400, detail="entry_id 또는 display_url이 필요합니다.")
 
 @app.post("/ask")
-async def ask(request: AskRequest):
+async def ask(ask_request: AskRequest, request: Request):
     """GPU 가속 RAG 답변을 스트리밍합니다."""
-    request_id = request.request_id
+    request_id = ask_request.request_id
     logger.info(f"🚀 GPU RAG REQUEST START: {request_id}")
 
     try:
@@ -1175,30 +1316,30 @@ async def ask(request: AskRequest):
         async_pipeline = app_state.get("async_pipeline")
         if async_pipeline:
             # GPU 가속 경로
-            result = await ask_with_gpu_acceleration(request, async_pipeline)
+            result = await ask_with_gpu_acceleration(ask_request, async_pipeline, request)
             # P1-4: Record successful RAG request
-            RAG_REQ.labels(source=request.source.value, result="success").inc()
+            RAG_REQ.labels(source=ask_request.source.value, result="success").inc()
             return result
         else:
             # 레거시 경로 (기존 코드 유지)
-            result = await ask_legacy(request)
+            result = await ask_legacy(ask_request, request)
             # P1-4: Record successful RAG request
-            RAG_REQ.labels(source=request.source.value, result="success").inc()
+            RAG_REQ.labels(source=ask_request.source.value, result="success").inc()
             return result
     
     except Exception as e:
         # P1-4: Record failed RAG request
-        RAG_REQ.labels(source=request.source.value, result="error").inc()
+        RAG_REQ.labels(source=ask_request.source.value, result="error").inc()
         logger.error(f"❌ RAG request failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
-async def ask_with_gpu_acceleration(request: AskRequest, pipeline: AsyncPipeline):
+async def ask_with_gpu_acceleration(ask_request: AskRequest, pipeline: AsyncPipeline, request: Request):
     """GPU 가속을 사용한 새로운 RAG 엔드포인트"""
-    request_id = request.request_id
+    request_id = ask_request.request_id
     
     # 인사말 체크
-    if any(greet in request.query for greet in config.GREETINGS):
+    if any(greet in ask_request.query for greet in config.GREETINGS):
         async def greeting_stream():
             yield json.dumps({
                 "status": "completed",
@@ -1211,9 +1352,9 @@ async def ask_with_gpu_acceleration(request: AskRequest, pipeline: AsyncPipeline
     try:
         # GPU 가속 검색 실행
         search_result = await pipeline.run_search(
-            query=request.query,
-            source_type=request.source.value,
-            limit=request.top_k,
+            query=ask_request.query,
+            source_type=ask_request.source.value,
+            limit=ask_request.top_k,
             score_threshold=0.3
         )
         
@@ -1240,7 +1381,7 @@ async def ask_with_gpu_acceleration(request: AskRequest, pipeline: AsyncPipeline
             payload = result.get("payload", {})
             text = payload.get("text", "")[:500]  # 500자 제한
             
-            if request.source.value == "mail":
+            if ask_request.source.value == "mail":
                 subject = payload.get("mail_subject", "제목 없음")
                 sender = payload.get("sender", "발송자 미상")
                 context_parts.append(f"메일 {i}: {subject}\n발송자: {sender}\n내용: {text}")
@@ -1263,12 +1404,12 @@ async def ask_with_gpu_acceleration(request: AskRequest, pipeline: AsyncPipeline
         context_text = "\n\n".join(context_parts)
         
         # 소스별 프롬프트 생성
-        if request.source.value == "mail":
+        if ask_request.source.value == "mail":
             system_prompt = dedent(f"""\
                 당신은 HD현대미포 선각기술부의 메일 검색 비서입니다.
                 반드시 한국어로 간결하게 답변하세요.
                 
-                질문: {request.query}
+                질문: {ask_request.query}
 
                 참고 메일:
                 {context_text}
@@ -1285,7 +1426,7 @@ async def ask_with_gpu_acceleration(request: AskRequest, pipeline: AsyncPipeline
                 당신은 HD현대미포 선각기술부의 문서 검색 비서입니다.
                 반드시 한국어로 간결하게 답변하세요.
                 
-                질문: {request.query}
+                질문: {ask_request.query}
 
                 참고 문서:
                 {context_text}
@@ -1304,7 +1445,7 @@ async def ask_with_gpu_acceleration(request: AskRequest, pipeline: AsyncPipeline
         async def gpu_accelerated_stream():
             try:
                 # LLM 스트리밍 응답
-                response = await resource_manager.generate_llm_response(system_prompt, request.model.value)
+                response = await resource_manager.generate_llm_response(system_prompt, ask_request.model.value)
                 
                 # 응답을 청크로 나누어 스트리밍
                 chunks = response.split()
@@ -1352,32 +1493,32 @@ async def ask_with_gpu_acceleration(request: AskRequest, pipeline: AsyncPipeline
         return StreamingResponse(error_stream(), media_type="application/x-ndjson")
 
 
-async def ask_legacy(request: AskRequest):
+async def ask_legacy(ask_request: AskRequest, request: Request):
     """레거시 RAG 엔드포인트 (GPU 미사용)"""
-    request_id = request.request_id
+    request_id = ask_request.request_id
     
     try:
         if not all(k in app_state for k in ["embeddings", "qdrant_clients"]):
             raise HTTPException(status_code=503, detail="서비스가 준비되지 않았습니다.")
         
-        logger.info(f"[{request_id}] 📨 Legacy Question: {request.query}")
-        logger.info(f"[{request_id}] 📁 Source: {request.source.value}")
+        logger.info(f"[{request_id}] 📨 Legacy Question: {ask_request.query}")
+        logger.info(f"[{request_id}] 📁 Source: {ask_request.source.value}")
         
-        client = app_state["qdrant_clients"][request.source.value]
-        context_text, references = search_qdrant(request.query, request_id, client, config, request.source.value)
+        client = app_state["qdrant_clients"][ask_request.source.value]
+        context_text, references = search_qdrant(ask_request.query, request_id, client, config, ask_request.source.value, request)
         
         if not context_text:
-            logger.warning(f"[{request_id}] ⚠️ No context found for question: {request.query}")
+            logger.warning(f"[{request_id}] ⚠️ No context found for question: {ask_request.query}")
         else:
             logger.info(f"[{request_id}] ✅ Context prepared with {len(references)} references")
         
         # source에 따른 메타프롬프트 분리
-        if request.source.value == "mail":
+        if ask_request.source.value == "mail":
             final_prompt = dedent(f"""\
                 당신은 HD현대미포 선각기술부의 메일 검색 비서입니다.
                 반드시 한국어로 간결하게 답변하세요.
                 
-                질문: {request.query}
+                질문: {ask_request.query}
 
                 참고 메일:
                 {context_text or "참고 자료 없음"}
@@ -1396,7 +1537,7 @@ async def ask_legacy(request: AskRequest):
                 당신은 HD현대미포 선각기술부의 문서 검색 비서입니다.
                 반드시 한국어로 간결하게 답변하세요.
                 
-                질문: {request.query}
+                질문: {ask_request.query}
 
                 참고 문서:
                 {context_text or "참고 자료 없음"}
@@ -1427,7 +1568,7 @@ async def ask_legacy(request: AskRequest):
 
         async def response_generator():
             full_answer = ""
-            async for chunk in stream_llm_response(final_prompt, request.model.value, request_id):
+            async for chunk in stream_llm_response(final_prompt, ask_request.model.value, request_id):
                 full_answer += chunk
                 yield json.dumps({"answer_chunk": chunk}) + "\n"
             

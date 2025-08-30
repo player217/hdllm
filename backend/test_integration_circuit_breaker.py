@@ -9,7 +9,7 @@ import asyncio
 import time
 import logging
 from unittest.mock import AsyncMock, patch
-from resource_manager import ResourceManager, ResourceConfig, CircuitBreakerState
+from backend.resource_manager import ResourceManager, ResourceConfig, CircuitBreakerState
 
 # 테스트용 로깅 설정
 logging.basicConfig(level=logging.INFO)

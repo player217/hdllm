@@ -66,7 +66,16 @@
       "Read(/C:\\c\\Users\\lseun\\Documents/**)",
       "Read(/C:\\c\\Users\\lseun\\Documents/**)",
       "Read(/C:\\c\\Users\\lseun\\Documents/**)",
-      "Read(/C:\\c\\Users\\lseun\\Documents/**)"
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Read(/C:\\c\\Users\\lseun\\Documents/**)",
+      "Bash(git push:*)",
+      "Bash(git checkout:*)",
+      "Bash(git commit:*)",
+      "Bash(.venvScriptspython.exe -m pytest backend/tests/test_smoke.py::TestSmoke::test_app_boot_and_ask_basic -q)",
+      "Bash(..venvScriptspython.exe -m uvicorn main:app --port 8080 --env-file ../.env.test)"
     ],
     "deny": []
   }

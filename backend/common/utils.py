@@ -11,6 +11,7 @@ import time
 import asyncio
 import functools
 import re
+import unicodedata
 import logging
 from typing import Any, Callable, Optional, List, TypeVar, Union
 from datetime import datetime
@@ -197,6 +198,75 @@ def mask_pii(text: str) -> str:
     )
     
     return text
+
+
+def sanitize_text(text: str, max_length: Optional[int] = None) -> str:
+    """
+    Sanitize text input to prevent XSS and injection attacks
+    
+    Args:
+        text: Input text to sanitize
+        max_length: Optional maximum length
+        
+    Returns:
+        Sanitized text
+    """
+    if not text:
+        return ""
+    
+    # Remove null bytes
+    text = text.replace('\x00', '')
+    
+    # Strip control characters
+    text = strip_control_chars(text)
+    
+    # Remove dangerous HTML/script tags
+    dangerous_patterns = [
+        r'<script[^>]*>.*?</script>',
+        r'<iframe[^>]*>.*?</iframe>',
+        r'<object[^>]*>.*?</object>',
+        r'<embed[^>]*>.*?</embed>',
+        r'javascript:',
+        r'on\w+\s*=',  # Event handlers
+        r'<img[^>]+src[\\s]*=[\\s]*["\']javascript:',
+    ]
+    
+    for pattern in dangerous_patterns:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE | re.DOTALL)
+    
+    # Escape HTML entities
+    text = text.replace('&', '&amp;')
+    text = text.replace('<', '&lt;')
+    text = text.replace('>', '&gt;')
+    text = text.replace('"', '&quot;')
+    text = text.replace("'", '&#x27;')
+    
+    # Apply length limit if specified
+    if max_length and len(text) > max_length:
+        text = text[:max_length]
+    
+    return text.strip()
+
+
+def strip_control_chars(text: str) -> str:
+    """
+    Remove control characters from text
+    
+    Args:
+        text: Input text
+        
+    Returns:
+        Text with control characters removed
+    """
+    if not text:
+        return ""
+    
+    # Remove all control characters except common whitespace
+    allowed_chars = ['\t', '\n', '\r']
+    return ''.join(
+        char for char in text 
+        if unicodedata.category(char)[0] != 'C' or char in allowed_chars
+    )
 
 
 class Timer:
