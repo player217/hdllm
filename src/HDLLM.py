@@ -34,15 +34,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import QThread, Signal, Qt, QTimer
 from PySide6.QtGui import QIcon, QAction
 
-# 사용자 탭 UI - 임시 비활성화 (안정성 우선)
-UserTab = None
-# try:
-#     from ui_user_tab import UserTab
-#     print("사용자 탭 활성화됨")
-# except ImportError as e:
-#     print(f"Warning: Could not import UserTab: {e}")
-#     print("사용자 탭이 비활성화됩니다.")
-#     UserTab = None
+# 사용자 탭 UI
+try:
+    from ui_user_tab import UserTab
+    print("사용자 탭 활성화됨")
+except ImportError as e:
+    print(f"Warning: Could not import UserTab: {e}")
+    print("사용자 탭이 비활성화됩니다.")
+    UserTab = None
 
 # 기능 구현을 위한 라이브러리
 try:

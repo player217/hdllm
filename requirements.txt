@@ -8,6 +8,9 @@ pywin32==306
 python-multipart==0.0.6
 sentence-transformers
 transformers
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+prometheus-client==0.20.0
 
 # Testing dependencies  
 pytest==7.4.3
@@ -18,9 +21,10 @@ sentencepiece
 tika
 openpyxl
 xlwings
-extract-msg
+extract-msg==0.55.0
 PySide6
 tqdm
 langchain
 langchain-community
 customtkinter
+setuptools<81

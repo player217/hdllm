@@ -495,7 +495,7 @@ except ImportError as e:
 
 # Import security configuration (MANDATORY FOR PRODUCTION)
 try:
-    from security_config import (
+    from backend.security_config import (
         CORS_CONFIG, 
         QuestionRequest, 
         EnhancedPIIMasker,
@@ -1301,6 +1301,16 @@ async def open_mail(request: Request):
     
     # 아무것도 제공되지 않은 경우
     raise HTTPException(status_code=400, detail="entry_id 또는 display_url이 필요합니다.")
+
+@app.options("/ask")
+async def ask_options():
+    """OPTIONS preflight handler for /ask endpoint"""
+    return Response(
+        status_code=200,
+        headers={
+            "Allow": "POST, OPTIONS"
+        }
+    )
 
 @app.post("/ask")
 async def ask(ask_request: AskRequest, request: Request):
