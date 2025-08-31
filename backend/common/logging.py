@@ -98,7 +98,7 @@ class JsonFormatter(logging.Formatter):
             "timestamp": datetime.utcnow().isoformat() + "Z",
             "level": record.levelname,
             "logger": record.name,
-            "message": record.getMessage(),
+            "message": self._safe_get_message(record),
             "request_id": getattr(record, "request_id", "-"),
             "scope": scope_ctx.get(),  # Add scope for dual routing
         }
@@ -125,6 +125,14 @@ class JsonFormatter(logging.Formatter):
             log_obj["context"] = record.extra_context
             
         return json.dumps(log_obj, ensure_ascii=False, default=str)
+    
+    def _safe_get_message(self, record: logging.LogRecord) -> str:
+        """Safely get message from log record, handling formatting errors"""
+        try:
+            return record.getMessage()
+        except (TypeError, ValueError) as e:
+            # Fallback for string formatting errors
+            return f"[LOG_FORMAT_ERROR] {record.msg} (args: {record.args}) - Error: {str(e)}"
 
 class TextFormatter(logging.Formatter):
     """Human-readable text formatter with request ID"""

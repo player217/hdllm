@@ -44,7 +44,9 @@ CORS_CONFIG = {
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost:8080",
-        "http://127.0.0.1:8080"
+        "http://127.0.0.1:8080",
+        "http://localhost:8001",
+        "http://127.0.0.1:8001"
     ],
     "allow_credentials": True,
     "allow_methods": ["GET", "POST", "OPTIONS"],
@@ -352,3 +354,19 @@ def sanitize_log_message(message: str) -> str:
     message = masker.mask(message)
     
     return message
+
+
+# =============================================================================
+# Security Middleware Setup
+# =============================================================================
+
+def setup_security_middleware(app):
+    """Setup security middleware for the application"""
+    # Add security headers middleware
+    app.add_middleware(SecurityMiddleware)
+    
+    # Add CORS middleware
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(CORSMiddleware, **CORS_CONFIG)
+    
+    return app

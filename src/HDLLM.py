@@ -38,9 +38,11 @@ from PySide6.QtGui import QIcon, QAction
 try:
     from ui_user_tab import UserTab
     print("사용자 탭 활성화됨")
+    logging.info("사용자 탭 UserTab import 성공")
 except ImportError as e:
     print(f"Warning: Could not import UserTab: {e}")
     print("사용자 탭이 비활성화됩니다.")
+    logging.warning(f"UserTab import 실패: {e}")
     UserTab = None
 
 # 기능 구현을 위한 라이브러리
@@ -444,19 +446,26 @@ class LLMToolApp(QMainWindow):
         self.setCentralWidget(self.tabs)
         
         # 사용자 탭 (첫 번째) - UserTab이 사용 가능한 경우에만
+        logging.info(f"UserTab 상태 확인: {UserTab is not None}")
         if UserTab is not None:
             try:
+                logging.info("사용자 탭 인스턴스 생성 시작")
                 self.user_tab = UserTab(self)
+                logging.info("사용자 탭 시그널 연결 시작")
                 self._connect_user_tab_signals()
+                logging.info("사용자 탭을 탭 위젯에 추가")
                 self.tabs.addTab(self.user_tab, "👤 사용자")
-                
+                logging.info("사용자 탭 초기 데이터 설정")
                 # 초기 설정 로드
                 self._initialize_user_tab_data()
+                logging.info("✅ 사용자 탭 생성 완료")
             except Exception as e:
+                logging.error(f"❌ 사용자 탭 생성 중 오류: {e}")
                 print(f"사용자 탭 생성 중 오류: {e}")
                 self.user_tab = None
         else:
             self.user_tab = None
+            logging.warning("❌ 사용자 탭을 사용할 수 없습니다 (UserTab is None)")
             print("사용자 탭을 사용할 수 없습니다.")
         
         # 기존 탭들
@@ -577,7 +586,7 @@ class LLMToolApp(QMainWindow):
         """사용자 탭에서 Qdrant 경로 변경 시 호출"""
         config = self.load_config()
         config['mail_qdrant_path'] = path
-        self.save_config(config)
+        self.save_config_data(config)
         logging.info(f"Qdrant 경로 변경: {path}")
     
     def onOutlookLiveToggled(self, enabled: bool):
@@ -925,6 +934,15 @@ class LLMToolApp(QMainWindow):
             with open(config_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         return {}
+    
+    def save_config_data(self, config_data):
+        """전체 config 데이터를 저장"""
+        config_path = self.project_root / "config.json"
+        try:
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config_data, f, ensure_ascii=False, indent=4)
+        except (OSError, json.JSONEncodeError) as e:
+            logging.error(f"설정 저장 실패: {e}")
     
     def quit_application(self):
         """애플리케이션 완전 종료"""

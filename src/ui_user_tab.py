@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox,
     QLineEdit, QListWidget, QListWidgetItem, QFileDialog, QGroupBox, QSpacerItem,
-    QSizePolicy
+    QSizePolicy, QAbstractItemView
 )
 
 class UserTab(QWidget):
@@ -64,7 +64,7 @@ class UserTab(QWidget):
         search = QLineEdit()
         search.setPlaceholderText("제목/발신자 검색")
         self.list_mails = QListWidget()
-        self.list_mails.setSelectionMode(self.list_mails.NoSelection)
+        self.list_mails.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.list_mails.setAlternatingRowColors(True)
         self.list_mails.setMinimumHeight(180)
         search.textChanged.connect(self._filter_mail_list)
