@@ -1,0 +1,115 @@
+# HD현대미포 Gauss-1 RAG System - Qdrant 설정 파일
+# 완전 독립 실행형 배포판용
+
+# 서비스 설정
+service:
+  host: "127.0.0.1"
+  http_port: 6333
+  grpc_port: 6334
+  enable_cors: true
+  enable_tls: false
+  
+# 저장소 설정
+storage:
+  # 데이터 저장 경로 (상대 경로)
+  storage_path: "./data/qdrant"
+  
+  # 성능 최적화
+  optimizers:
+    # 삭제된 벡터 정리 임계값 
+    deleted_threshold: 0.2
+    # 진공 청소 최소 벡터 수
+    vacuum_min_vector_number: 1000
+    # 기본 세그먼트 수
+    default_segment_number: 5
+
+# 로그 설정
+log_level: "INFO"
+
+# 텔레메트리 비활성화 (오프라인 환경)
+telemetry:
+  disabled: true
+  
+# CORS 설정 (웹 인터페이스 연동)
+cors:
+  allow_origin: 
+    - "http://localhost:8001"
+    - "http://127.0.0.1:8001"
+    - "http://localhost:8080"  
+    - "http://127.0.0.1:8080"
+  allow_methods:
+    - "GET"
+    - "POST" 
+    - "PUT"
+    - "DELETE"
+    - "OPTIONS"
+  allow_headers:
+    - "*"
+
+# 리소스 제한 (개인 PC 환경 최적화)
+limits:
+  # 최대 메모리 사용량 (MB)
+  max_memory_usage: 2048
+  # 최대 디스크 사용량 (GB)  
+  max_disk_usage: 10
+  # 동시 요청 수 제한
+  max_concurrent_requests: 100
+
+# 인덱싱 설정
+indexing:
+  # HNSW 파라미터 최적화
+  hnsw:
+    # 연결 수 (메모리 vs 정확도 트레이드오프)
+    m: 16
+    # 구축 시 탐색 깊이  
+    ef_construct: 100
+    # 전체 스캔 임계값
+    full_scan_threshold: 10000
+    
+  # 양자화 설정 (메모리 절약)
+  quantization:
+    # 스칼라 양자화 활성화
+    scalar_quantization:
+      type: "int8"
+      always_ram: false
+
+# 백업 설정 (비활성화)
+cluster:
+  enabled: false
+  
+# API 키 (선택사항 - 보안 강화 시 활성화)
+# api_key: "your_secure_api_key_here"
+
+# 스냅샷 설정
+snapshots:
+  # 자동 스냅샷 간격 (초, 0은 비활성화)
+  snapshots_interval: 0
+  # 스냅샷 보관 기간
+  snapshots_retention: 3
+
+# 성능 모니터링
+monitoring:
+  # 메트릭 수집 비활성화 (가벼운 실행)
+  enabled: false
+  
+# 네트워크 설정
+network:
+  # 연결 타임아웃 (초)
+  timeout: 30
+  # Keep-alive 설정
+  keep_alive: true
+  
+# 시스템 최적화
+system:
+  # 워커 스레드 수 (CPU 코어 수에 맞게 자동 조정)
+  max_workers: 0  # 0 = auto
+  
+  # I/O 최적화
+  io_uring: false  # Windows에서는 지원하지 않음
+  
+# 개발/디버그 설정
+debug:
+  # 상세 로깅 비활성화
+  log_requests: false
+  # 성능 추적 비활성화  
+  profiling: false

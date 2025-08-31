@@ -1,0 +1,2981 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Gauss-1 - AI Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            /* Zapier-inspired color scheme */
+            --bg-primary: #FFFEF7; /* Ivory */
+            --bg-secondary: #F5F4F0; /* Light gray */
+            --bg-sidebar: #1A1A1A; /* Black */
+            --bg-hover: rgba(255, 105, 0, 0.08);
+            --text-primary: #1A1A1A;
+            --text-secondary: #4A4A4A;
+            --text-tertiary: #7A7A7A;
+            --text-sidebar: #FFFEF7;
+            --border-light: rgba(26, 26, 26, 0.15);
+            --border-ultra-light: rgba(26, 26, 26, 0.08);
+            
+            /* Brand colors - Orange accent */
+            --brand-primary: #FF6900; /* Zapier Orange */
+            --brand-light: #FF8533;
+            --brand-dark: #E55A00;
+            --brand-ultra-light: rgba(255, 105, 0, 0.1);
+            
+            /* Status colors */
+            --success: #10a37f;
+            --error: #ef4444;
+            --warning: #f59e0b;
+            
+            /* Shadows */
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        body.dark {
+            --bg-primary: #1A1A1A;
+            --bg-secondary: #2D2D2D;
+            --bg-sidebar: #0F0F0F;
+            --bg-hover: rgba(255, 105, 0, 0.12);
+            --text-primary: #FFFEF7;
+            --text-secondary: #D0D0D0;
+            --text-tertiary: #9A9A9A;
+            --text-sidebar: #FFFEF7;
+            --border-light: rgba(255, 254, 247, 0.15);
+            --border-ultra-light: rgba(255, 254, 247, 0.08);
+            --brand-ultra-light: rgba(255, 105, 0, 0.2);
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+
+        /* Layout Container */
+        .app-container {
+            display: flex;
+            height: 100vh;
+            position: relative;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 260px;
+            background: var(--bg-sidebar);
+            border-right: 2px solid var(--brand-primary);
+            display: flex;
+            flex-direction: column;
+            transform: translateX(0);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 100;
+        }
+        
+        .sidebar.collapsed {
+            transform: translateX(-260px);
+        }
+        
+        /* Sidebar Toggle Button */
+        .sidebar-toggle {
+            position: fixed;
+            left: 16px;
+            top: 12px;
+            z-index: 1001;
+            width: 36px;
+            height: 36px;
+            background: var(--bg-sidebar);
+            border: 2px solid var(--brand-primary);
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            color: var(--text-sidebar);
+        }
+        
+        .sidebar-toggle:hover {
+            background: var(--brand-primary);
+            transform: scale(1.05);
+        }
+        
+        .sidebar.collapsed + .main-content .sidebar-toggle {
+            left: 16px;
+            background: var(--brand-primary);
+        }
+
+        .sidebar-header {
+            padding: 16px;
+            padding-top: 60px; /* Space for hamburger menu */
+            border-bottom: 1px solid rgba(255, 254, 247, 0.1);
+        }
+
+        .new-chat-btn {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--brand-primary);
+            border: none;
+            border-radius: 4px;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 8px;
+        }
+
+        .new-chat-btn:hover {
+            background: var(--brand-dark);
+            transform: translateY(-1px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .chat-history {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .chat-history-item {
+            padding: 10px 12px;
+            margin-bottom: 2px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            font-size: 14px;
+            color: #FFFEF7;
+            border-left: 3px solid transparent;
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .chat-history-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .chat-history-item.active {
+            background: var(--brand-ultra-light);
+            color: var(--brand-primary);
+        }
+
+        .sidebar-footer {
+            padding: 16px;
+            border-top: 1px solid rgba(255, 254, 247, 0.1);
+        }
+
+        .user-menu {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            color: var(--text-sidebar);
+        }
+
+        .user-menu:hover {
+            background: var(--bg-hover);
+        }
+
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--brand-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            background: var(--bg-primary);
+            margin-left: 260px;
+            transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .main-content.expanded {
+            margin-left: 0;
+        }
+
+        /* Header */
+        .main-header {
+            height: 60px;
+            border-bottom: 1px solid var(--border-ultra-light);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            background: var(--bg-primary);
+        }
+
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo {
+            font-size: 28px;
+            font-weight: 900;
+            color: var(--brand-primary);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            position: fixed;
+            left: 60px;
+            top: 16px;
+            z-index: 1000;
+        }
+        
+        .sidebar.collapsed ~ .main-content .logo {
+            left: 60px; /* Keep same position when sidebar is hidden */
+        }
+
+        .model-selector {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .model-selector:hover {
+            background: var(--bg-hover);
+        }
+
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .icon-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s ease;
+            color: var(--text-secondary);
+        }
+
+        .icon-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        /* Chat Container */
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px 0;
+        }
+
+        .chat-content {
+            width: 100%;
+            max-width: 768px;
+            padding: 0 24px;
+        }
+
+        /* Welcome Screen */
+        .welcome-screen {
+            text-align: center;
+            padding: 80px 24px;
+        }
+
+        .welcome-title {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+        }
+
+        .welcome-subtitle {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 48px;
+        }
+
+        .suggestions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .suggestion-card {
+            padding: 16px;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            border: 1px solid var(--border-ultra-light);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: left;
+        }
+
+        .suggestion-card:hover {
+            background: var(--bg-hover);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .suggestion-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .suggestion-text {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        /* Messages */
+        .message-group {
+            padding: 24px 0;
+            border-bottom: 1px solid var(--border-ultra-light);
+        }
+
+        .message-group:last-child {
+            border-bottom: none;
+        }
+
+        .message {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .message:last-child {
+            margin-bottom: 0;
+        }
+
+        .message-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .message.user .message-avatar {
+            background: var(--brand-primary);
+            color: white;
+        }
+
+        .message.assistant .message-avatar {
+            background: var(--brand-ultra-light);
+            color: var(--brand-primary);
+        }
+
+        .message-content {
+            flex: 1;
+            font-size: 15px;
+            line-height: 1.6;
+            color: var(--text-primary);
+        }
+
+        .message-content pre {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 12px;
+            margin: 12px 0;
+            overflow-x: auto;
+        }
+
+        .message-content code {
+            background: var(--bg-secondary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        /* Input Container */
+        .input-container {
+            position: sticky;
+            bottom: 0;
+            background: var(--bg-primary);
+            border-top: 1px solid var(--border-ultra-light);
+            padding: 16px 24px 24px;
+        }
+
+        .input-wrapper {
+            max-width: 768px;
+            margin: 0 auto;
+            position: relative;
+        }
+
+        .input-box {
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-light);
+            border-radius: 12px;
+            padding: 12px 48px 12px 16px;
+            font-size: 15px;
+            color: var(--text-primary);
+            resize: none;
+            outline: none;
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            min-height: 52px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: inherit;
+        }
+
+        .input-box:focus {
+            border-color: var(--brand-primary);
+            box-shadow: 0 0 0 3px var(--brand-ultra-light);
+        }
+
+        .input-controls {
+            position: absolute;
+            right: 8px;
+            bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .send-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            background: var(--brand-primary);
+            border: none;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+        }
+
+        .send-btn:hover {
+            background: var(--brand-dark);
+        }
+
+        .send-btn:disabled {
+            background: var(--bg-hover);
+            color: var(--text-tertiary);
+            cursor: not-allowed;
+        }
+
+        /* Source Selector */
+        .source-selector {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            justify-content: center;
+        }
+
+        .source-btn {
+            padding: 6px 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-light);
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .source-btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .source-btn.active {
+            background: var(--brand-primary);
+            border-color: var(--brand-primary);
+            color: white;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 32px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-ultra-light);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            font-size: 12px;
+            color: var(--text-tertiary);
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-right: 16px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--success);
+        }
+
+        .status-indicator.error {
+            background: var(--error);
+        }
+        
+        /* Qdrant Status Badges */
+        .qdrant-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            cursor: help;
+            transition: all 0.2s ease;
+            min-width: 32px;
+            text-align: center;
+        }
+        
+        /* Badge states */
+        .qdrant-badge.ok {
+            background: var(--success);
+            color: white;
+        }
+        
+        .qdrant-badge.warn {
+            background: #f59e0b;
+            color: white;
+        }
+        
+        .qdrant-badge.fail {
+            background: var(--error);
+            color: white;
+        }
+        
+        .qdrant-badge.unknown {
+            background: var(--border-light);
+            color: var(--text-secondary);
+        }
+        
+        .qdrant-badge:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        /* Mobile Menu Toggle */
+        .mobile-menu-toggle {
+            display: none;
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            z-index: 1000;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-light);
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Loading Animation */
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            padding: 8px 0;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-tertiary);
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                opacity: 0.3;
+                transform: translateY(0);
+            }
+            30% {
+                opacity: 1;
+                transform: translateY(-4px);
+            }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 0;
+                bottom: 0;
+                z-index: 999;
+                transform: translateX(-100%);
+            }
+
+            .sidebar.open {
+                transform: translateX(0);
+            }
+
+            .mobile-menu-toggle {
+                display: flex;
+            }
+
+            .main-header {
+                padding-left: 60px;
+            }
+
+            .chat-content {
+                padding: 0 16px;
+            }
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-light);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-tertiary);
+        }
+
+        /* Icons (using Unicode for simplicity) */
+        .icon-plus::before { content: '+'; font-size: 20px; }
+        .icon-menu::before { content: '☰'; font-size: 18px; }
+        .icon-send::before { content: '→'; font-size: 18px; }
+        .icon-sun::before { content: '☀'; font-size: 18px; }
+        .icon-moon::before { content: '🌙'; font-size: 16px; }
+        .icon-settings::before { content: '⚙'; font-size: 18px; }
+        .icon-delete::before { content: '🗑'; font-size: 14px; }
+        .icon-edit::before { content: '✏'; font-size: 14px; }
+        .icon-thumbs-up::before { content: '👍'; font-size: 16px; }
+        .icon-thumbs-down::before { content: '👎'; font-size: 16px; }
+        .icon-retry::before { content: '🔄'; font-size: 16px; }
+
+        /* Chat History Enhancements */
+        .chat-search {
+            padding: 8px;
+            border-bottom: 1px solid var(--border-ultra-light);
+        }
+
+        .chat-search input {
+            width: 100%;
+            padding: 8px 12px;
+            background: rgba(255, 254, 247, 0.15);
+            border: 1px solid rgba(255, 254, 247, 0.3);
+            border-radius: 4px;
+            font-size: 13px;
+            color: #FFFEF7;
+            outline: none;
+        }
+        
+        .chat-search input::placeholder {
+            color: rgba(255, 254, 247, 0.5);
+        }
+
+        .chat-search input:focus {
+            border-color: var(--brand-primary);
+            background: rgba(255, 254, 247, 0.2);
+        }
+
+        .chat-group {
+            margin-bottom: 16px;
+        }
+
+        .chat-group-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #FFFEF7;
+            opacity: 0.7;
+            padding: 4px 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Removed duplicate .chat-history-item styles - already defined above */
+
+        .chat-item-content {
+            flex: 1;
+            min-width: 0; /* Important for text-overflow to work in flexbox */
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .chat-title {
+            display: block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-weight: 500;
+            color: #FFFEF7;
+        }
+
+        .chat-preview {
+            font-size: 12px;
+            color: rgba(255, 254, 247, 0.6);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .chat-meta {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .chat-time {
+            font-size: 11px;
+            color: var(--text-tertiary);
+        }
+
+        .chat-actions {
+            display: none;
+            gap: 4px;
+        }
+
+        .chat-history-item:hover .chat-actions {
+            display: flex;
+        }
+
+        .chat-action-btn {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s ease;
+            color: var(--text-tertiary);
+        }
+
+        .chat-action-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .chat-action-btn.delete:hover {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--error);
+        }
+        
+        /* Toast Notification System */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+        
+        .toast {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 12px 16px;
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 300px;
+            max-width: 500px;
+            pointer-events: auto;
+            animation: slideIn 0.3s ease;
+            transition: all 0.3s ease;
+        }
+        
+        .toast.error {
+            border-color: var(--error);
+            background: rgba(239, 68, 68, 0.1);
+        }
+        
+        .toast.success {
+            border-color: var(--success);
+            background: rgba(16, 163, 127, 0.1);
+        }
+        
+        .toast.warning {
+            border-color: var(--warning);
+            background: rgba(245, 158, 11, 0.1);
+        }
+        
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        
+        .toast-content {
+            flex: 1;
+        }
+        
+        .toast-title {
+            font-weight: 600;
+            margin-bottom: 2px;
+            color: var(--text-primary);
+        }
+        
+        .toast-message {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        
+        .toast-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        
+        .toast-btn {
+            padding: 4px 12px;
+            background: var(--brand-primary);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+        
+        .toast-btn:hover {
+            background: var(--brand-dark);
+        }
+        
+        .toast-close {
+            background: transparent;
+            border: none;
+            color: var(--text-tertiary);
+            cursor: pointer;
+            padding: 4px;
+            font-size: 18px;
+            line-height: 1;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        /* Message Rating System */
+        .message-rating {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-ultra-light);
+        }
+        
+        .rating-btn {
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-light);
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            transition: all 0.15s ease;
+        }
+        
+        .rating-btn:hover {
+            background: var(--bg-hover);
+            transform: translateY(-1px);
+        }
+        
+        .rating-btn.active.good {
+            background: rgba(16, 163, 127, 0.1);
+            border-color: var(--success);
+            color: var(--success);
+        }
+        
+        .rating-btn.active.bad {
+            background: rgba(239, 68, 68, 0.1);
+            border-color: var(--error);
+            color: var(--error);
+        }
+        
+        .rating-feedback {
+            margin-left: auto;
+            font-size: 12px;
+            color: var(--text-tertiary);
+            font-style: italic;
+        }
+
+        /* Settings Panel Styles */
+        .settings-panel {
+            position: fixed;
+            right: -400px;
+            top: 0;
+            bottom: 0;
+            width: 400px;
+            background: var(--bg-secondary);
+            box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+            transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 1001;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .settings-panel.active {
+            right: 0;
+        }
+
+        .settings-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-light);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-primary);
+        }
+
+        .settings-header h3 {
+            margin: 0;
+            color: var(--text-primary);
+        }
+
+        .close-settings {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .close-settings:hover {
+            background-color: var(--bg-hover);
+        }
+
+        .settings-content {
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .settings-section {
+            margin-bottom: 30px;
+        }
+
+        .settings-section h4 {
+            margin: 0 0 15px 0;
+            color: var(--text-secondary);
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .settings-group {
+            margin-bottom: 15px;
+        }
+
+        .settings-section label {
+            display: block;
+            margin-bottom: 10px;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .settings-section input[type="text"] {
+            width: 100%;
+            padding: 8px 12px;
+            margin-top: 5px;
+            border: 1px solid var(--border-light);
+            border-radius: 4px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .settings-section input[type="text"]:focus {
+            outline: none;
+            border-color: var(--brand-primary);
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            margin-right: 8px;
+        }
+
+        .save-settings-btn {
+            width: 100%;
+            padding: 12px;
+            background: var(--brand-primary);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .save-settings-btn:hover {
+            background: var(--brand-dark);
+        }
+    </style>
+    <!-- Favicon to prevent 404 errors -->
+    <!-- Orange circle with G for Gauss-1 -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23FF6900'/><text x='16' y='23' font-family='Arial, sans-serif' font-size='20' font-weight='bold' text-anchor='middle' fill='white'>G</text></svg>">
+    <link rel="shortcut icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23FF6900'/><text x='16' y='23' font-family='Arial, sans-serif' font-size='20' font-weight='bold' text-anchor='middle' fill='white'>G</text></svg>">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Toggle Button -->
+        <button class="sidebar-toggle" onclick="toggleSidebar()" title="Toggle Sidebar (Ctrl+B)">
+            <span class="icon-menu"></span>
+        </button>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <button class="new-chat-btn" onclick="chatManager.createNewChat()">
+                    <span class="icon-plus"></span>
+                    새 대화
+                </button>
+            </div>
+            
+            <div class="chat-search">
+                <input type="text" placeholder="대화 검색..." id="chat-search-input" onkeyup="chatManager.searchChats(this.value)">
+            </div>
+            
+            <div class="chat-history" id="chat-history">
+                <!-- Chat history will be dynamically populated -->
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="user-menu">
+                    <div class="user-avatar">G-1</div>
+                    <div>
+                        <div style="font-size: 14px; font-weight: 500; color: var(--text-sidebar);">Gauss-1</div>
+                        <div style="font-size: 12px; color: rgba(255, 254, 247, 0.7);">AI Assistant</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="main-header">
+                <div class="header-title">
+                    <div class="logo">Gauss-1</div>
+                </div>
+                
+                <div class="header-controls">
+                    <div id="server-status" style="display: flex; gap: 12px; align-items: center; font-size: 12px;">
+                        <div class="status-item">
+                            <span class="status-indicator"></span>
+                            <span>백엔드</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="qdrant-badge personal" id="qdrant-personal" title="개인 Qdrant (127.0.0.1:6333)">개인</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="qdrant-badge dept" id="qdrant-dept" title="부서 Qdrant (10.150.104.37:6333)">부서</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-indicator"></span>
+                            <span>Ollama</span>
+                        </div>
+                    </div>
+                    <button class="icon-btn" onclick="toggleDarkMode()">
+                        <span class="icon-sun" id="theme-icon"></span>
+                    </button>
+                    <button class="icon-btn" onclick="toggleSettings()">
+                        <span class="icon-settings"></span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Chat Container -->
+            <div class="chat-container" id="chat-container">
+                <div class="chat-content">
+                    <!-- Welcome Screen (shown when no messages) -->
+                    <div class="welcome-screen" id="welcome-screen">
+                        <h1 class="welcome-title">Gauss-1에 오신 것을 환영합니다</h1>
+                        <p class="welcome-subtitle">AI 어시스턴트입니다. 무엇을 도와드릴까요?</p>
+                        
+                        <div class="suggestions-grid">
+                            <div class="suggestion-card" onclick="sendSuggestion('최근 회의록을 요약해줘')">
+                                <div class="suggestion-title">회의록 요약</div>
+                                <div class="suggestion-text">최근 회의 내용을 간단히 정리</div>
+                            </div>
+                            <div class="suggestion-card" onclick="sendSuggestion('이번 주 받은 메일 중 중요한 것들을 보여줘')">
+                                <div class="suggestion-title">메일 분석</div>
+                                <div class="suggestion-text">중요 메일 필터링 및 요약</div>
+                            </div>
+                            <div class="suggestion-card" onclick="sendSuggestion('프로젝트 일정을 확인해줘')">
+                                <div class="suggestion-title">일정 확인</div>
+                                <div class="suggestion-text">프로젝트 마일스톤 체크</div>
+                            </div>
+                            <div class="suggestion-card" onclick="sendSuggestion('기술 문서를 검색해줘')">
+                                <div class="suggestion-title">문서 검색</div>
+                                <div class="suggestion-text">관련 기술 자료 찾기</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Messages will be added here -->
+                    <div id="messages-container"></div>
+                </div>
+            </div>
+
+            <!-- Input Container -->
+            <div class="input-container">
+                <div class="input-wrapper">
+                    <!-- Source Selector -->
+                    <div class="source-selector">
+                        <button class="source-btn active" data-source="mail" data-scope="personal" onclick="selectSource('mail', 'personal')">
+                            📧 개인 데이터
+                        </button>
+                        <button class="source-btn" data-source="mail" data-scope="dept" onclick="selectSource('mail', 'dept')">
+                            🏢 부서 데이터
+                        </button>
+                    </div>
+                    
+                    <!-- Input Box -->
+                    <textarea 
+                        class="input-box" 
+                        id="user-input"
+                        placeholder="메시지를 입력하세요..."
+                        onkeypress="handleKeyPress(event)"
+                        oninput="adjustTextareaHeight(this)"
+                    ></textarea>
+                    
+                    <div class="input-controls">
+                        <button class="send-btn" id="send-btn" onclick="sendMessage()">
+                            <span class="icon-send"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        // Configuration with cache busting
+        const BACKEND_BASE = 'http://localhost:8080';
+        const APP_VERSION = '1.0.4'; // Increment this when changes are made
+        let currentSource = 'mail';
+        let currentScope = 'personal';  // Global scope tracking
+        let isStreaming = false;
+        let abortController = null;
+        let statusTimer = null; // Global timer for status polling
+        
+        // Chat Manager Class
+        class ChatManager {
+            constructor() {
+                this.currentChatId = null;
+                this.chats = new Map();
+                this.loadChats();
+                this.autoSaveInterval = null;
+            }
+            
+            loadChats() {
+                try {
+                    const stored = localStorage.getItem('mentat_chats');
+                    if (stored) {
+                        const data = JSON.parse(stored);
+                        this.chats = new Map(data.chats || []);
+                        this.currentChatId = data.currentChatId || null;
+                    }
+                } catch (error) {
+                    console.error('Failed to load chats:', error);
+                    this.chats = new Map();
+                }
+            }
+            
+            saveChats() {
+                try {
+                    const data = {
+                        chats: Array.from(this.chats.entries()),
+                        currentChatId: this.currentChatId
+                    };
+                    localStorage.setItem('mentat_chats', JSON.stringify(data));
+                } catch (error) {
+                    console.error('Failed to save chats:', error);
+                }
+            }
+            
+            createNewChat() {
+                const chatId = 'chat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                const chat = {
+                    id: chatId,
+                    title: '새 대화',
+                    messages: [],
+                    createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString()
+                };
+                
+                this.chats.set(chatId, chat);
+                this.currentChatId = chatId;
+                this.saveChats();
+                this.renderChatList();
+                this.clearChatView();
+                
+                return chatId;
+            }
+            
+            getCurrentChat() {
+                if (!this.currentChatId) {
+                    this.createNewChat();
+                }
+                return this.chats.get(this.currentChatId);
+            }
+            
+            addMessage(role, content) {
+                const chat = this.getCurrentChat();
+                if (!chat) return;
+                
+                chat.messages.push({
+                    role: role,
+                    content: content,
+                    timestamp: new Date().toISOString()
+                });
+                
+                // Update chat title from first user message if still default
+                if (chat.title === '새 대화' && role === 'user' && chat.messages.length === 1) {
+                    chat.title = content.substring(0, 30) + (content.length > 30 ? '...' : '');
+                }
+                
+                chat.updatedAt = new Date().toISOString();
+                this.saveChats();
+                this.renderChatList();
+            }
+            
+            loadChat(chatId) {
+                if (!this.chats.has(chatId)) return;
+                
+                this.currentChatId = chatId;
+                this.saveChats();
+                this.renderChatList();
+                this.renderChatMessages();
+            }
+            
+            deleteChat(chatId) {
+                if (!confirm('이 대화를 삭제하시겠습니까?')) return;
+                
+                this.chats.delete(chatId);
+                
+                if (this.currentChatId === chatId) {
+                    if (this.chats.size > 0) {
+                        this.currentChatId = Array.from(this.chats.keys())[0];
+                        this.renderChatMessages();
+                    } else {
+                        this.currentChatId = null;
+                        this.clearChatView();
+                    }
+                }
+                
+                this.saveChats();
+                this.renderChatList();
+            }
+            
+            searchChats(query) {
+                const lowerQuery = query.toLowerCase();
+                const filtered = Array.from(this.chats.values()).filter(chat => 
+                    chat.title.toLowerCase().includes(lowerQuery) ||
+                    chat.messages.some(msg => msg.content.toLowerCase().includes(lowerQuery))
+                );
+                
+                this.renderChatList(filtered);
+            }
+            
+            renderChatList(filteredChats = null) {
+                const container = document.getElementById('chat-history');
+                if (!container) return;
+                
+                const chatsToRender = filteredChats || Array.from(this.chats.values());
+                
+                // Sort by updatedAt (most recent first)
+                chatsToRender.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+                
+                // Group chats by date
+                const groups = this.groupChatsByDate(chatsToRender);
+                
+                container.innerHTML = '';
+                
+                for (const [groupTitle, chats] of Object.entries(groups)) {
+                    if (chats.length === 0) continue;
+                    
+                    const groupDiv = document.createElement('div');
+                    groupDiv.className = 'chat-group';
+                    
+                    const groupTitleDiv = document.createElement('div');
+                    groupTitleDiv.className = 'chat-group-title';
+                    groupTitleDiv.textContent = groupTitle;
+                    groupDiv.appendChild(groupTitleDiv);
+                    
+                    chats.forEach(chat => {
+                        const chatItem = document.createElement('div');
+                        chatItem.className = 'chat-history-item';
+                        chatItem.style.display = 'flex';
+                        chatItem.style.justifyContent = 'space-between';
+                        chatItem.style.alignItems = 'center';
+                        if (chat.id === this.currentChatId) {
+                            chatItem.classList.add('active');
+                        }
+                        
+                        const contentDiv = document.createElement('div');
+                        contentDiv.className = 'chat-item-content';
+                        
+                        const titleDiv = document.createElement('div');
+                        titleDiv.className = 'chat-title';
+                        titleDiv.textContent = chat.title;
+                        contentDiv.appendChild(titleDiv);
+                        
+                        if (chat.messages.length > 0) {
+                            const previewDiv = document.createElement('div');
+                            previewDiv.className = 'chat-preview';
+                            const lastMessage = chat.messages[chat.messages.length - 1];
+                            const previewText = lastMessage.content.substring(0, 50);
+                            previewDiv.textContent = previewText.length < lastMessage.content.length ? previewText + '...' : previewText;
+                            contentDiv.appendChild(previewDiv);
+                        }
+                        
+                        chatItem.appendChild(contentDiv);
+                        
+                        const actionsDiv = document.createElement('div');
+                        actionsDiv.className = 'chat-actions';
+                        
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.className = 'chat-delete-btn';
+                        deleteBtn.innerHTML = '🗑';
+                        deleteBtn.title = '대화 삭제';
+                        deleteBtn.style.cssText = 'background: none; border: none; cursor: pointer; font-size: 16px; padding: 4px; opacity: 0.7;';
+                        deleteBtn.onmouseover = () => deleteBtn.style.opacity = '1';
+                        deleteBtn.onmouseout = () => deleteBtn.style.opacity = '0.7';
+                        deleteBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            if (confirm('이 대화를 삭제하시겠습니까?')) {
+                                this.deleteChat(chat.id);
+                            }
+                        };
+                        actionsDiv.appendChild(deleteBtn);
+                        
+                        chatItem.appendChild(actionsDiv);
+                        
+                        chatItem.onclick = () => this.loadChat(chat.id);
+                        
+                        groupDiv.appendChild(chatItem);
+                    });
+                    
+                    container.appendChild(groupDiv);
+                }
+                
+                if (chatsToRender.length === 0) {
+                    container.innerHTML = '<div style="padding: 20px; text-align: center; color: rgba(255, 254, 247, 0.5);">대화 내역이 없습니다</div>';
+                }
+            }
+            
+            groupChatsByDate(chats) {
+                const groups = {
+                    '오늘': [],
+                    '어제': [],
+                    '이번 주': [],
+                    '이번 달': [],
+                    '이전': []
+                };
+                
+                const now = new Date();
+                const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const yesterday = new Date(today);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const weekAgo = new Date(today);
+                weekAgo.setDate(weekAgo.getDate() - 7);
+                const monthAgo = new Date(today);
+                monthAgo.setMonth(monthAgo.getMonth() - 1);
+                
+                chats.forEach(chat => {
+                    const chatDate = new Date(chat.updatedAt);
+                    
+                    if (chatDate >= today) {
+                        groups['오늘'].push(chat);
+                    } else if (chatDate >= yesterday) {
+                        groups['어제'].push(chat);
+                    } else if (chatDate >= weekAgo) {
+                        groups['이번 주'].push(chat);
+                    } else if (chatDate >= monthAgo) {
+                        groups['이번 달'].push(chat);
+                    } else {
+                        groups['이전'].push(chat);
+                    }
+                });
+                
+                return groups;
+            }
+            
+            renderChatMessages() {
+                const chat = this.getCurrentChat();
+                if (!chat) return;
+                
+                const messagesContainer = document.getElementById('messages-container');
+                messagesContainer.innerHTML = '';
+                
+                // Hide welcome screen
+                const welcomeScreen = document.getElementById('welcome-screen');
+                if (welcomeScreen) {
+                    welcomeScreen.style.display = 'none';
+                }
+                
+                // Render all messages
+                chat.messages.forEach(msg => {
+                    this.renderMessage(msg.role, msg.content);
+                });
+                
+                // Scroll to bottom
+                const chatContainer = document.getElementById('chat-container');
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+            
+            renderMessage(role, content, messageId = null) {
+                const messagesContainer = document.getElementById('messages-container');
+                
+                // Create message group if needed
+                let messageGroup = messagesContainer.lastElementChild;
+                if (!messageGroup || !messageGroup.classList.contains('message-group') || 
+                    messageGroup.dataset.role !== role) {
+                    messageGroup = document.createElement('div');
+                    messageGroup.className = 'message-group';
+                    messageGroup.dataset.role = role;
+                    messagesContainer.appendChild(messageGroup);
+                }
+                
+                // Create message
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${role}`;
+                
+                const avatar = document.createElement('div');
+                avatar.className = 'message-avatar';
+                avatar.textContent = role === 'user' ? 'U' : 'G-1';
+                
+                const contentWrapper = document.createElement('div');
+                contentWrapper.style.flex = '1';
+                
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                contentDiv.textContent = content;
+                contentWrapper.appendChild(contentDiv);
+                
+                // Add rating buttons for assistant messages
+                if (role === 'assistant' && messageId) {
+                    const ratingDiv = document.createElement('div');
+                    ratingDiv.className = 'message-rating';
+                    ratingDiv.id = `rating-${messageId}`;
+                    
+                    const goodBtn = document.createElement('button');
+                    goodBtn.className = 'rating-btn';
+                    goodBtn.innerHTML = '<span class="icon-thumbs-up"></span>도움됨';
+                    goodBtn.onclick = () => this.handleRating(messageId, 'good');
+                    
+                    const badBtn = document.createElement('button');
+                    badBtn.className = 'rating-btn';
+                    badBtn.innerHTML = '<span class="icon-thumbs-down"></span>도움안됨';
+                    badBtn.onclick = () => this.handleRating(messageId, 'bad');
+                    
+                    ratingDiv.appendChild(goodBtn);
+                    ratingDiv.appendChild(badBtn);
+                    
+                    // Check if already rated
+                    const existingRating = ratingManager.getRating(messageId);
+                    if (existingRating) {
+                        if (existingRating.rating === 'good') {
+                            goodBtn.classList.add('active', 'good');
+                        } else {
+                            badBtn.classList.add('active', 'bad');
+                        }
+                        
+                        const feedback = document.createElement('span');
+                        feedback.className = 'rating-feedback';
+                        feedback.textContent = '평가해 주셔서 감사합니다';
+                        ratingDiv.appendChild(feedback);
+                    }
+                    
+                    contentWrapper.appendChild(ratingDiv);
+                }
+                
+                messageDiv.appendChild(avatar);
+                messageDiv.appendChild(contentWrapper);
+                messageGroup.appendChild(messageDiv);
+            }
+            
+            handleRating(messageId, rating) {
+                // Save rating
+                ratingManager.addRating(messageId, rating);
+                
+                // Update UI
+                const ratingDiv = document.getElementById(`rating-${messageId}`);
+                if (ratingDiv) {
+                    const buttons = ratingDiv.querySelectorAll('.rating-btn');
+                    buttons.forEach(btn => btn.classList.remove('active', 'good', 'bad'));
+                    
+                    if (rating === 'good') {
+                        buttons[0].classList.add('active', 'good');
+                    } else {
+                        buttons[1].classList.add('active', 'bad');
+                    }
+                    
+                    // Add feedback message
+                    let feedback = ratingDiv.querySelector('.rating-feedback');
+                    if (!feedback) {
+                        feedback = document.createElement('span');
+                        feedback.className = 'rating-feedback';
+                        ratingDiv.appendChild(feedback);
+                    }
+                    feedback.textContent = '평가해 주셔서 감사합니다';
+                }
+                
+                // Show toast
+                toastManager.success('평가가 저장되었습니다');
+            }
+            
+            clearChatView() {
+                document.getElementById('messages-container').innerHTML = '';
+                const welcomeScreen = document.getElementById('welcome-screen');
+                if (welcomeScreen) {
+                    welcomeScreen.style.display = 'block';
+                }
+            }
+            
+            startAutoSave() {
+                this.stopAutoSave();
+                this.autoSaveInterval = setInterval(() => {
+                    this.saveChats();
+                }, 30000); // Auto-save every 30 seconds
+            }
+            
+            stopAutoSave() {
+                if (this.autoSaveInterval) {
+                    clearInterval(this.autoSaveInterval);
+                    this.autoSaveInterval = null;
+                }
+            }
+        }
+        
+        // Initialize Chat Manager
+        const chatManager = new ChatManager();
+        
+        // Rating Manager Class
+        class RatingManager {
+            constructor() {
+                this.ratings = new Map();
+                this.loadRatings();
+            }
+            
+            loadRatings() {
+                try {
+                    const stored = localStorage.getItem('mentat_ratings');
+                    if (stored) {
+                        const data = JSON.parse(stored);
+                        this.ratings = new Map(data.ratings || []);
+                    }
+                } catch (error) {
+                    console.error('Failed to load ratings:', error);
+                    this.ratings = new Map();
+                }
+            }
+            
+            saveRatings() {
+                try {
+                    const data = {
+                        ratings: Array.from(this.ratings.entries()),
+                        statistics: this.getStatistics()
+                    };
+                    localStorage.setItem('mentat_ratings', JSON.stringify(data));
+                } catch (error) {
+                    console.error('Failed to save ratings:', error);
+                }
+            }
+            
+            addRating(messageId, rating) {
+                this.ratings.set(messageId, {
+                    rating: rating,
+                    timestamp: new Date().toISOString(),
+                    chatId: chatManager.currentChatId
+                });
+                this.saveRatings();
+                return true;
+            }
+            
+            getRating(messageId) {
+                return this.ratings.get(messageId);
+            }
+            
+            getStatistics() {
+                let good = 0, bad = 0;
+                this.ratings.forEach(r => {
+                    if (r.rating === 'good') good++;
+                    else if (r.rating === 'bad') bad++;
+                });
+                return { totalGood: good, totalBad: bad };
+            }
+        }
+        
+        // Initialize Rating Manager
+        const ratingManager = new RatingManager();
+        
+        // Toast Notification System
+        class ToastManager {
+            constructor() {
+                this.container = document.getElementById('toast-container');
+            }
+            
+            show(options) {
+                const toast = document.createElement('div');
+                toast.className = `toast ${options.type || 'info'}`;
+                
+                const icon = document.createElement('div');
+                icon.className = 'toast-icon';
+                icon.textContent = this.getIcon(options.type);
+                
+                const content = document.createElement('div');
+                content.className = 'toast-content';
+                
+                if (options.title) {
+                    const title = document.createElement('div');
+                    title.className = 'toast-title';
+                    title.textContent = options.title;
+                    content.appendChild(title);
+                }
+                
+                const message = document.createElement('div');
+                message.className = 'toast-message';
+                message.textContent = options.message;
+                content.appendChild(message);
+                
+                if (options.actions) {
+                    const actions = document.createElement('div');
+                    actions.className = 'toast-actions';
+                    options.actions.forEach(action => {
+                        const btn = document.createElement('button');
+                        btn.className = 'toast-btn';
+                        btn.textContent = action.text;
+                        btn.onclick = action.onClick;
+                        actions.appendChild(btn);
+                    });
+                    content.appendChild(actions);
+                }
+                
+                const closeBtn = document.createElement('button');
+                closeBtn.className = 'toast-close';
+                closeBtn.textContent = '×';
+                closeBtn.onclick = () => this.remove(toast);
+                
+                toast.appendChild(icon);
+                toast.appendChild(content);
+                toast.appendChild(closeBtn);
+                
+                this.container.appendChild(toast);
+                
+                // Auto remove after duration
+                if (options.duration !== 0) {
+                    setTimeout(() => this.remove(toast), options.duration || 5000);
+                }
+                
+                return toast;
+            }
+            
+            getIcon(type) {
+                switch(type) {
+                    case 'error': return '❌';
+                    case 'success': return '✅';
+                    case 'warning': return '⚠️';
+                    default: return 'ℹ️';
+                }
+            }
+            
+            remove(toast) {
+                toast.style.transform = 'translateX(100%)';
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }
+            
+            error(message, title = '오류') {
+                return this.show({ type: 'error', title, message });
+            }
+            
+            success(message, title = '성공') {
+                return this.show({ type: 'success', title, message });
+            }
+            
+            warning(message, title = '경고') {
+                return this.show({ type: 'warning', title, message });
+            }
+        }
+        
+        // Initialize Toast Manager
+        const toastManager = new ToastManager();
+
+        // Optimized polling intervals
+        let pollInterval = 15000; // Default 15 seconds when active
+        let isPageActive = true;
+        
+        // Adjust polling based on page visibility
+        document.addEventListener('visibilitychange', function() {
+            isPageActive = !document.hidden;
+            adjustPollingInterval();
+        });
+        
+        function adjustPollingInterval() {
+            if (statusTimer) {
+                clearInterval(statusTimer);
+            }
+            
+            // Use shorter interval when page is active, longer when inactive
+            pollInterval = isPageActive ? 15000 : 60000;
+            statusTimer = setInterval(checkServerStatus, pollInterval);
+            console.debug('[poll] interval =', pollInterval);
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            checkServerStatus();
+            // Use adjustPollingInterval instead of direct setInterval
+            adjustPollingInterval();
+            loadDarkModePreference();
+            adjustTextareaHeight(document.getElementById('user-input'));
+            
+            // Initialize chat system
+            chatManager.renderChatList();
+            chatManager.startAutoSave();
+            
+            // Load current chat if exists
+            if (chatManager.currentChatId) {
+                chatManager.renderChatMessages();
+            }
+            
+            // Load sidebar state
+            loadSidebarState();
+            
+            // Keyboard shortcuts
+            document.addEventListener('keydown', function(e) {
+                // Ctrl+B or Cmd+B to toggle sidebar
+                if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+                    e.preventDefault();
+                    toggleSidebar();
+                }
+            })
+        });
+
+        // Dark Mode Toggle
+        function toggleDarkMode() {
+            document.body.classList.toggle('dark');
+            const isDark = document.body.classList.contains('dark');
+            localStorage.setItem('darkMode', isDark);
+            document.getElementById('theme-icon').className = isDark ? 'icon-moon' : 'icon-sun';
+        }
+
+        function loadDarkModePreference() {
+            const isDark = localStorage.getItem('darkMode') === 'true';
+            if (isDark) {
+                document.body.classList.add('dark');
+                document.getElementById('theme-icon').className = 'icon-moon';
+            }
+        }
+
+        // Sidebar Toggle
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const mainContent = document.querySelector('.main-content');
+            const isCollapsed = sidebar.classList.toggle('collapsed');
+            
+            // Toggle expanded class on main content
+            if (isCollapsed) {
+                mainContent.classList.add('expanded');
+            } else {
+                mainContent.classList.remove('expanded');
+            }
+            
+            // Save state to localStorage
+            localStorage.setItem('sidebarCollapsed', isCollapsed);
+        }
+        
+        // Load sidebar state
+        function loadSidebarState() {
+            const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+            const mainContent = document.querySelector('.main-content');
+            
+            if (isCollapsed) {
+                document.getElementById('sidebar').classList.add('collapsed');
+                mainContent.classList.add('expanded');
+            }
+        }
+
+        // Source Selection with Scope
+        function selectSource(source, scope) {
+            currentSource = source;
+            currentScope = scope;
+            
+            // Update button states
+            document.querySelectorAll('.source-btn').forEach(btn => {
+                const isActive = btn.dataset.source === source && btn.dataset.scope === scope;
+                btn.classList.toggle('active', isActive);
+            });
+            
+            // Update status display
+            const statusText = scope === 'personal' ? '개인 DB 사용중' : '부서 DB 사용중';
+            toastManager.show(`데이터 소스 변경: ${statusText}`, 'info');
+        }
+
+        // Polling Control Utilities
+        function pauseStatusPoll() {
+            if (statusTimer) { 
+                clearInterval(statusTimer); 
+                statusTimer = null; 
+            }
+        }
+        
+        function resumeStatusPoll() {
+            if (!statusTimer) { 
+                statusTimer = setInterval(checkServerStatus, pollInterval); 
+            }
+        }
+        
+        // Server Status Check with Retry Logic
+        let statusRetryCount = 0;
+        const MAX_STATUS_RETRIES = 3;
+        
+        async function checkServerStatus(isRetry = false) {
+            // Skip status check if streaming is in progress
+            if (isStreaming) return;
+            
+            try {
+                const response = await fetch(`${BACKEND_BASE}/status`, {
+                    signal: AbortSignal.timeout(5000) // 5 second timeout
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatusIndicators(data);
+                    statusRetryCount = 0; // Reset retry count on success
+                    
+                    // Show success message if recovering from error
+                    if (document.body.dataset.connectionError === 'true') {
+                        toastManager.success('서버 연결이 복구되었습니다', '연결 성공');
+                        document.body.dataset.connectionError = 'false';
+                    }
+                    
+                    // Also check Qdrant status specifically
+                    checkQdrantStatus();
+                } else {
+                    handleStatusError('서버 응답 오류', response.status);
+                }
+            } catch (error) {
+                console.error('Status check failed:', error);
+                handleStatusError('네트워크 오류', error.message);
+            }
+        }
+        
+        // Qdrant 상태 체크 함수
+        async function checkQdrantStatus() {
+            try {
+                const response = await fetch(`${BACKEND_BASE}/api/v2/system/qdrant/status`);
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    // Update Qdrant-specific indicators
+                    const qdrantIndicator = document.querySelector('.status-indicator:nth-child(2)');
+                    if (qdrantIndicator) {
+                        if (data.connected) {
+                            qdrantIndicator.className = 'status-indicator success';
+                            qdrantIndicator.title = `Qdrant 연결됨 (Collections: ${data.collections})`;
+                            
+                            // Remove warning if it exists
+                            const warning = document.querySelector('.qdrant-warning');
+                            if (warning) warning.remove();
+                        } else {
+                            qdrantIndicator.className = 'status-indicator error';
+                            qdrantIndicator.title = 'Qdrant 연결 실패';
+                            
+                            // Show warning if not already shown
+                            if (!document.querySelector('.qdrant-warning')) {
+                                showQdrantWarning(data.message);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Qdrant status check failed:', error);
+            }
+        }
+        
+        // Qdrant 미실행 경고 표시
+        function showQdrantWarning(message) {
+            const warning = document.createElement('div');
+            warning.className = 'qdrant-warning';
+            warning.style.cssText = `
+                position: fixed;
+                top: 70px;
+                right: 20px;
+                background: #ff6b6b;
+                color: white;
+                padding: 10px 15px;
+                border-radius: 4px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                z-index: 1000;
+                max-width: 350px;
+                font-size: 14px;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            `;
+            warning.innerHTML = `
+                <span style="font-size: 18px;">⚠️</span>
+                <div>
+                    <strong>Qdrant 미연결</strong><br>
+                    <small>${message || 'RAG 기능이 제한됩니다.'}</small>
+                </div>
+                <button onclick="this.parentElement.remove()" style="
+                    background: none;
+                    border: none;
+                    color: white;
+                    cursor: pointer;
+                    font-size: 18px;
+                    margin-left: auto;
+                ">✕</button>
+            `;
+            document.body.appendChild(warning);
+            
+            // Auto-remove after 10 seconds
+            setTimeout(() => warning.remove(), 10000);
+        }
+        
+        function handleStatusError(errorType, errorDetail) {
+            updateStatusIndicators({ backend: false, qdrant_mail: false, qdrant_doc: false, ollama: false });
+            document.body.dataset.connectionError = 'true';
+            
+            // Retry logic
+            if (statusRetryCount < MAX_STATUS_RETRIES) {
+                statusRetryCount++;
+                const retryDelay = Math.min(1000 * Math.pow(2, statusRetryCount), 10000); // Exponential backoff
+                
+                if (statusRetryCount === 1) {
+                    toastManager.warning(`${errorType}: 재연결 시도 중... (${statusRetryCount}/${MAX_STATUS_RETRIES})`, '연결 재시도');
+                }
+                
+                setTimeout(() => checkServerStatus(true), retryDelay);
+            } else {
+                // Only show error after all retries failed
+                if (!document.body.dataset.statusErrorShown) {
+                    toastManager.error(
+                        `서버에 연결할 수 없습니다. (${errorType})\n백엔드 서버가 실행 중인지 확인해주세요.\nRUN.bat 파일을 실행했는지 확인하세요.`, 
+                        '연결 실패'
+                    );
+                    document.body.dataset.statusErrorShown = 'true';
+                }
+                
+                // Reset retry count after 30 seconds for next attempt
+                setTimeout(() => {
+                    statusRetryCount = 0;
+                    document.body.dataset.statusErrorShown = '';
+                }, 30000);
+            }
+        }
+
+        function updateStatusIndicators(status) {
+            const indicators = document.querySelectorAll('.status-indicator');
+            // backend 키가 없으면 fastapi 키를 확인
+            const okBackend = (status.backend ?? status.fastapi ?? false);
+            
+            // Update backend indicator (first indicator)
+            indicators[0].classList.toggle('error', !okBackend);
+            
+            // Update Ollama indicator (last indicator)
+            if (indicators.length > 1) {
+                indicators[indicators.length - 1].classList.toggle('error', !status.ollama);
+            }
+            
+            // Update Qdrant badges
+            updateQdrantStatus(status);
+        }
+        
+        function updateQdrantStatus(status) {
+            const personalBadge = document.getElementById('qdrant-personal');
+            const deptBadge = document.getElementById('qdrant-dept');
+            
+            if (personalBadge && deptBadge) {
+                // Update personal Qdrant status
+                updateBadgeStatus(personalBadge, status.qdrant?.personal?.status || 'unknown', {
+                    host: '127.0.0.1:6333',
+                    name: '개인 Qdrant'
+                });
+                
+                // Update department Qdrant status  
+                updateBadgeStatus(deptBadge, status.qdrant?.dept?.status || 'unknown', {
+                    host: '10.150.104.37:6333', 
+                    name: '부서 Qdrant'
+                });
+            }
+        }
+        
+        function updateBadgeStatus(badge, status, info) {
+            // Remove all status classes
+            badge.classList.remove('ok', 'warn', 'fail', 'unknown');
+            
+            // Add appropriate status class
+            badge.classList.add(status);
+            
+            // Update tooltip
+            const statusText = {
+                'ok': '연결됨',
+                'warn': '경고',
+                'fail': '연결 실패', 
+                'unknown': '상태 불명'
+            };
+            
+            badge.title = `${info.name} (${info.host}): ${statusText[status]}`;
+        }
+
+        function showQdrantWarning() {
+            const warning = document.createElement('div');
+            warning.className = 'qdrant-warning';
+            warning.style.cssText = `
+                position: fixed;
+                top: 60px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: #FFF3CD;
+                color: #856404;
+                padding: 12px 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                z-index: 1000;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                font-size: 14px;
+            `;
+            warning.innerHTML = `
+                <span style="font-size: 20px;">⚠️</span>
+                <span>Qdrant가 실행되지 않았습니다. RAG 기능이 제한됩니다.</span>
+                <button onclick="hideQdrantWarning()" style="
+                    background: none;
+                    border: none;
+                    font-size: 20px;
+                    cursor: pointer;
+                    margin-left: 10px;
+                ">✕</button>
+            `;
+            document.body.appendChild(warning);
+        }
+
+        function hideQdrantWarning() {
+            const warning = document.querySelector('.qdrant-warning');
+            if (warning) {
+                warning.remove();
+            }
+        }
+
+        // Message Handling
+        function sendMessage() {
+            const input = document.getElementById('user-input');
+            const message = input.value.trim();
+            
+            if (!message || isStreaming) return;
+            
+            // Hide welcome screen
+            const welcomeScreen = document.getElementById('welcome-screen');
+            if (welcomeScreen) {
+                welcomeScreen.style.display = 'none';
+            }
+            
+            // Add user message
+            addMessage('user', message);
+            
+            // Clear input
+            input.value = '';
+            adjustTextareaHeight(input);
+            
+            // Send to backend
+            streamResponse(message);
+        }
+
+        function sendSuggestion(text) {
+            document.getElementById('user-input').value = text;
+            sendMessage();
+        }
+
+        function addMessage(role, content, messageId = null) {
+            // Generate message ID for assistant messages
+            if (role === 'assistant' && !messageId) {
+                messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            }
+            
+            // Save to chat history
+            chatManager.addMessage(role, content);
+            
+            // Render message
+            const messagesContainer = document.getElementById('messages-container');
+            
+            // Create message group if needed
+            let messageGroup = messagesContainer.lastElementChild;
+            if (!messageGroup || !messageGroup.classList.contains('message-group') || 
+                messageGroup.dataset.role !== role) {
+                messageGroup = document.createElement('div');
+                messageGroup.className = 'message-group';
+                messageGroup.dataset.role = role;
+                messagesContainer.appendChild(messageGroup);
+            }
+            
+            // Create message
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = role === 'user' ? 'U' : 'G-1';
+            
+            const contentWrapper = document.createElement('div');
+            contentWrapper.style.flex = '1';
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.textContent = content;
+            contentWrapper.appendChild(contentDiv);
+            
+            // Add rating buttons for assistant messages
+            if (role === 'assistant' && messageId) {
+                const ratingDiv = document.createElement('div');
+                ratingDiv.className = 'message-rating';
+                ratingDiv.id = `rating-${messageId}`;
+                
+                const goodBtn = document.createElement('button');
+                goodBtn.className = 'rating-btn';
+                goodBtn.innerHTML = '<span class="icon-thumbs-up"></span>도움됨';
+                goodBtn.onclick = () => handleRating(messageId, 'good');
+                
+                const badBtn = document.createElement('button');
+                badBtn.className = 'rating-btn';
+                badBtn.innerHTML = '<span class="icon-thumbs-down"></span>도움안됨';
+                badBtn.onclick = () => handleRating(messageId, 'bad');
+                
+                ratingDiv.appendChild(goodBtn);
+                ratingDiv.appendChild(badBtn);
+                
+                contentWrapper.appendChild(ratingDiv);
+            }
+            
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(contentWrapper);
+            messageGroup.appendChild(messageDiv);
+            
+            // Scroll to bottom
+            const chatContainer = document.getElementById('chat-container');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            
+            return { contentDiv: contentDiv, messageId: messageId };
+        }
+        
+        function handleRating(messageId, rating) {
+            // Save rating
+            ratingManager.addRating(messageId, rating);
+            
+            // Update UI
+            const ratingDiv = document.getElementById(`rating-${messageId}`);
+            if (ratingDiv) {
+                const buttons = ratingDiv.querySelectorAll('.rating-btn');
+                buttons.forEach(btn => btn.classList.remove('active', 'good', 'bad'));
+                
+                if (rating === 'good') {
+                    buttons[0].classList.add('active', 'good');
+                } else {
+                    buttons[1].classList.add('active', 'bad');
+                }
+                
+                // Add feedback message
+                let feedback = ratingDiv.querySelector('.rating-feedback');
+                if (!feedback) {
+                    feedback = document.createElement('span');
+                    feedback.className = 'rating-feedback';
+                    ratingDiv.appendChild(feedback);
+                }
+                feedback.textContent = '평가해 주셔서 감사합니다';
+            }
+            
+            // Show toast
+            toastManager.success('평가가 저장되었습니다');
+        }
+
+        function addTypingIndicator() {
+            const messagesContainer = document.getElementById('messages-container');
+            
+            const messageGroup = document.createElement('div');
+            messageGroup.className = 'message-group';
+            messageGroup.dataset.role = 'assistant';
+            messageGroup.id = 'typing-indicator-group';
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message assistant';
+            
+            const avatar = document.createElement('div');
+            avatar.className = 'message-avatar';
+            avatar.textContent = 'G-1';
+            
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'typing-indicator';
+            typingDiv.innerHTML = '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>';
+            
+            messageDiv.appendChild(avatar);
+            messageDiv.appendChild(typingDiv);
+            messageGroup.appendChild(messageDiv);
+            messagesContainer.appendChild(messageGroup);
+            
+            // Scroll to bottom
+            const chatContainer = document.getElementById('chat-container');
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function removeTypingIndicator() {
+            const typingGroup = document.getElementById('typing-indicator-group');
+            if (typingGroup) {
+                typingGroup.remove();
+            }
+        }
+
+        // Stream Response
+        async function streamResponse(question) {
+            isStreaming = true;
+            pauseStatusPoll(); // Pause status polling during streaming
+            document.getElementById('send-btn').disabled = true;
+            
+            // Add typing indicator
+            addTypingIndicator();
+            
+            let timeoutId = null;
+            const TIMEOUT_DURATION = 120000; // 2 minutes timeout for long responses
+            
+            try {
+                abortController = new AbortController();
+                
+                // Setup timeout
+                timeoutId = setTimeout(() => {
+                    if (abortController) {
+                        abortController.abort();
+                        toastManager.error('응답 시간이 초과되었습니다', '연결 오류');
+                    }
+                }, TIMEOUT_DURATION);
+                
+                const response = await fetch(`${BACKEND_BASE}/ask?db_scope=${currentScope}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Qdrant-Scope': currentScope  // Include scope in header for dual routing
+                    },
+                    body: JSON.stringify({
+                        question: question,
+                        model: 'gemma3:4b',
+                        source: currentSource
+                    }),
+                    signal: abortController.signal
+                });
+                
+                // Check response headers for scope and fallback information
+                const usedScope = response.headers.get('x-used-scope');
+                const fallbackUsed = response.headers.get('x-fallback-used');
+                
+                // Show toast notifications for scope changes or fallbacks
+                if (usedScope && usedScope !== currentScope) {
+                    const scopeText = usedScope === 'personal' ? '개인 DB' : '부서 DB';
+                    toastManager.show(`요청이 ${scopeText}로 처리되었습니다.`, 'warning');
+                }
+                
+                if (fallbackUsed === 'true') {
+                    toastManager.show('부서 DB 연결 실패로 개인 DB를 사용했습니다.', 'warning');
+                }
+                
+                if (!response.ok) {
+                    let errorMessage = `서버 오류 (${response.status})`;
+                    
+                    // Provide specific error messages based on status code
+                    if (response.status === 404) {
+                        errorMessage = '백엔드 API를 찾을 수 없습니다. 서버가 올바르게 실행 중인지 확인하세요.';
+                    } else if (response.status === 500) {
+                        errorMessage = '서버 내부 오류가 발생했습니다. 로그를 확인하세요.';
+                    } else if (response.status === 503) {
+                        errorMessage = '서비스가 준비되지 않았습니다. Ollama와 Qdrant가 실행 중인지 확인하세요.';
+                    } else if (response.status === 400) {
+                        try {
+                            const errorData = await response.json();
+                            errorMessage = errorData.detail || errorMessage;
+                        } catch (e) {
+                            // Ignore JSON parse error
+                        }
+                    }
+                    
+                    throw new Error(errorMessage);
+                }
+                
+                // Clear timeout on successful connection
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                
+                // Don't remove typing indicator here - wait for first response chunk
+                // removeTypingIndicator(); // Removed - too early
+                
+                // Variables to track message creation
+                let messageContent = null;
+                let messageId = null;
+                let currentMessageGroup = null;
+                let messageCreated = false;
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let accumulatedText = '';
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    
+                    const chunk = decoder.decode(value, { stream: true });
+                    const lines = chunk.split('\n');
+                    
+                    for (const raw of lines) {
+                        const line = raw.trim();
+                        if (!line) continue;
+                        
+                        // NDJSON이면 그대로, SSE면 'data: ' 제거
+                        const jsonStr = line.startsWith('data: ') ? line.slice(6) : line;
+                        
+                        try {
+                            const data = JSON.parse(jsonStr);
+                            
+                            // 백엔드 키명: answer_chunk / references
+                            if (data.answer_chunk) {
+                                // Create message only on first response chunk
+                                if (!messageCreated) {
+                                    removeTypingIndicator();
+                                    
+                                    // Now create the actual message
+                                    const result = addMessage('assistant', '');
+                                    messageContent = result.contentDiv;
+                                    messageId = result.messageId;
+                                    
+                                    // Store reference to the message group for references
+                                    const messageGroups = document.querySelectorAll('.message-group[data-role="assistant"]');
+                                    currentMessageGroup = messageGroups[messageGroups.length - 1];
+                                    
+                                    messageCreated = true;
+                                }
+                                
+                                accumulatedText += data.answer_chunk;
+                                messageContent.textContent = accumulatedText;
+                                
+                                // Scroll to bottom
+                                const chatContainer = document.getElementById('chat-container');
+                                chatContainer.scrollTop = chatContainer.scrollHeight;
+                            }
+                            if (data.references) {
+                                console.log('Received references:', data.references);
+                                
+                                // Ensure message group exists before adding references
+                                if (!currentMessageGroup) {
+                                    // If no message group yet, find or create one
+                                    const messageGroups = document.querySelectorAll('.message-group[data-role="assistant"]');
+                                    currentMessageGroup = messageGroups[messageGroups.length - 1];
+                                }
+                                
+                                if (currentMessageGroup && !currentMessageGroup.querySelector('.references-container')) {
+                                    console.log('Appending references to message group');
+                                    appendReferences(currentMessageGroup, data.references);
+                                } else {
+                                    console.warn('Could not append references - message group not found or references already exist');
+                                }
+                            }
+                        } catch (e) {
+                            // JSON 파싱 실패 시 조용히 무시 (빈 줄이나 불완전한 데이터일 수 있음)
+                            if (line.length > 0) {
+                                console.debug('Stream line parse skip:', line);
+                            }
+                        }
+                    }
+                }
+                
+                // Show success indicator
+                if (accumulatedText) {
+                    // Response completed successfully
+                }
+                
+            } catch (error) {
+                console.error('Stream error:', error);
+                removeTypingIndicator();
+                
+                if (error.name === 'AbortError') {
+                    if (timeoutId) {
+                        // Timeout occurred
+                        const retryToast = toastManager.show({
+                            type: 'error',
+                            title: '연결 시간 초과',
+                            message: '서버 응답이 없습니다. 다시 시도하시겠습니까?',
+                            duration: 0,
+                            actions: [
+                                {
+                                    text: '재시도',
+                                    onClick: () => {
+                                        toastManager.remove(retryToast);
+                                        streamResponse(question);
+                                    }
+                                },
+                                {
+                                    text: '취소',
+                                    onClick: () => toastManager.remove(retryToast)
+                                }
+                            ]
+                        });
+                    }
+                } else if (error.message.includes('Failed to fetch')) {
+                    // Network error - backend not running
+                    toastManager.error('백엔드 서버에 연결할 수 없습니다', '연결 실패');
+                    addMessage('assistant', 
+                        '❌ 서버 연결 실패\n\n' +
+                        '다음 사항을 확인해주세요:\n' +
+                        '1. RUN.bat 파일을 실행했는지 확인\n' +
+                        '2. 백엔드가 포트 8080에서 실행 중인지 확인\n' +
+                        '3. Ollama와 Qdrant 서비스가 실행 중인지 확인'
+                    );
+                    
+                    // Provide retry option
+                    const retryToast = toastManager.show({
+                        type: 'warning',
+                        title: '재시도',
+                        message: '서버가 준비되면 재시도하세요',
+                        duration: 0,
+                        actions: [
+                            {
+                                text: '재시도',
+                                onClick: () => {
+                                    toastManager.remove(retryToast);
+                                    checkServerStatus();
+                                    streamResponse(question);
+                                }
+                            },
+                            {
+                                text: '닫기',
+                                onClick: () => toastManager.remove(retryToast)
+                            }
+                        ]
+                    });
+                } else if (error.message.includes('서버 오류') || error.message.includes('서비스가 준비되지')) {
+                    // Specific server errors
+                    toastManager.error(error.message, '서버 오류');
+                    addMessage('assistant', `❌ ${error.message}`);
+                } else if (error.message.includes('백엔드 API를 찾을 수 없습니다')) {
+                    // API endpoint not found
+                    toastManager.error(error.message, 'API 오류');
+                    addMessage('assistant', 
+                        '❌ API 엔드포인트를 찾을 수 없습니다\n\n' +
+                        '백엔드 서버가 올바른 버전으로 실행 중인지 확인하세요.'
+                    );
+                } else {
+                    // Unknown error
+                    toastManager.error(`오류: ${error.message}`, '처리 실패');
+                    addMessage('assistant', `죄송합니다. 오류가 발생했습니다:\n${error.message}`);
+                }
+            } finally {
+                // Clear timeout if still active
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                }
+                
+                resumeStatusPoll(); // Resume status polling after streaming
+                isStreaming = false;
+                document.getElementById('send-btn').disabled = false;
+                abortController = null;
+            }
+        }
+
+        // Stop Streaming
+        function stopStreaming() {
+            if (abortController) {
+                abortController.abort();
+            }
+        }
+        
+        // HTML Escape Helper
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, '&amp;')
+                      .replace(/</g, '&lt;')
+                      .replace(/>/g, '&gt;')
+                      .replace(/"/g, '&quot;')
+                      .replace(/'/g, '&#39;');
+        }
+        
+        // Open Mail Reference (통합된 POST 방식)
+        function openReference(linkKey, displayUrl) {
+            if (!linkKey) return;
+            
+            fetch(`${BACKEND_BASE}/open-mail`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    entry_id: linkKey,
+                    display_url: displayUrl || null
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (!data.ok) {
+                    toastManager.error('메일을 열 수 없습니다', '오류');
+                }
+            })
+            .catch(error => {
+                console.error('Error opening mail:', error);
+                toastManager.error('백엔드 연결에 실패했습니다', '연결 오류');
+            });
+        }
+        
+        // Open File Reference (for document mode)
+        function openFileReference(filePath) {
+            if (!filePath) return;
+            
+            // Try to open the file path
+            // Note: This might need a backend endpoint to handle file opening
+            // For now, we'll try to open it as a file:// URL or request backend to handle it
+            
+            // Option 1: If it's a network path, try to open directly
+            if (filePath.startsWith('\\\\') || filePath.startsWith('//')) {
+                // Convert to file URL format
+                const fileUrl = 'file:' + filePath.replace(/\\/g, '/');
+                window.open(fileUrl, '_blank');
+            } 
+            // Option 2: Request backend to open the file
+            else {
+                fetch(`${BACKEND_BASE}/open_file`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ file_path: filePath })
+                })
+                .then(response => {
+                    if (!response.ok && response.status !== 204) {
+                        toastManager.error('파일을 열 수 없습니다', '오류');
+                    } else {
+                        toastManager.success('파일 열기 요청을 전송했습니다');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error opening file:', error);
+                    toastManager.error('파일 열기 중 오류가 발생했습니다', '오류');
+                });
+            }
+        }
+        
+        // Append References to Message
+        function appendReferences(messageWrapper, references) {
+            // Check if Qdrant is connected
+            const qdrantConnected = !document.querySelector('.status-indicator.error:nth-child(2)');
+            
+            // Debug mode - add dummy references for testing
+            const DEBUG_MODE = localStorage.getItem('debugMode') === 'true';
+            if (DEBUG_MODE && (!references || references.length === 0)) {
+                references = [
+                    {
+                        type: 'mail',
+                        subject: '[테스트] 프로젝트 진행 상황 보고',
+                        sender: 'kim@hdmipo.com',
+                        date: '2025-08-25',
+                        mail_link: 'test-mail-123',
+                        score: 0.85
+                    },
+                    {
+                        type: 'file',
+                        title: '안전작업절차서.pdf',
+                        path: 'C:/Documents/safety.pdf',
+                        score: 0.78
+                    }
+                ];
+                console.log('[DEBUG] Using dummy references for testing');
+            }
+            
+            if (!references || references.length === 0) {
+                // Show notice if Qdrant is not connected
+                if (!qdrantConnected) {
+                    const notice = document.createElement('div');
+                    notice.className = 'reference-notice';
+                    notice.style.cssText = `
+                        margin-top: 10px;
+                        padding: 8px 12px;
+                        background: rgba(255, 152, 0, 0.1);
+                        border-left: 3px solid #FF9800;
+                        border-radius: 4px;
+                        font-size: 12px;
+                        color: var(--text-secondary);
+                    `;
+                    notice.innerHTML = '📌 Qdrant가 실행되지 않아 참조 문서를 표시할 수 없습니다.';
+                    messageWrapper.appendChild(notice);
+                }
+                return;
+            }
+            
+            const refContainer = document.createElement('div');
+            refContainer.className = 'references-container';
+            refContainer.style.marginTop = '16px';
+            refContainer.style.padding = '12px';
+            refContainer.style.background = 'var(--bg-secondary)';
+            refContainer.style.borderRadius = '8px';
+            refContainer.style.border = '1px solid var(--border-light)';
+            
+            // Title - change icon based on type
+            const title = document.createElement('div');
+            title.style.fontSize = '12px';
+            title.style.fontWeight = '600';
+            title.style.color = 'var(--text-tertiary)';
+            title.style.marginBottom = '8px';
+            
+            // Check reference type
+            const isDocument = references.some(ref => ref.type === 'document');
+            title.textContent = isDocument ? '📁 참고 문서' : '📎 참고 메일';
+            refContainer.appendChild(title);
+            
+            // Reference items
+            references.forEach(ref => {
+                const refItem = document.createElement('div');
+                refItem.style.display = 'flex';
+                refItem.style.alignItems = 'center';
+                refItem.style.padding = '8px';
+                refItem.style.marginBottom = '4px';
+                refItem.style.background = 'var(--bg-primary)';
+                refItem.style.borderRadius = '6px';
+                refItem.style.transition = 'all 0.2s ease';
+                
+                if (ref.type === 'document') {
+                    // Document reference
+                    refItem.innerHTML = `
+                        <div style="flex: 1;">
+                            <div style="font-size: 13px; font-weight: 500; color: var(--text-primary);">
+                                📄 ${escapeHtml(ref.title)}
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">
+                                ${escapeHtml(ref.date)} • ${escapeHtml(ref.path || '파일 경로')}
+                            </div>
+                        </div>
+                        <button onclick="openFileReference('${escapeHtml(ref.path)}')" 
+                                style="padding: 6px 12px; background: var(--brand-primary); color: white; 
+                                       border: none; border-radius: 4px; font-size: 12px; cursor: pointer;
+                                       transition: all 0.2s ease;"
+                                onmouseover="this.style.background='var(--brand-primary-hover)'"
+                                onmouseout="this.style.background='var(--brand-primary)'">
+                            파일 열기
+                        </button>
+                    `;
+                } else {
+                    // Mail reference (existing logic)
+                    refItem.innerHTML = `
+                        <div style="flex: 1;">
+                            <div style="font-size: 13px; font-weight: 500; color: var(--text-primary);">
+                                ✉️ ${escapeHtml(ref.title)}
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 2px;">
+                                ${escapeHtml(ref.sender || 'N/A')} • ${escapeHtml(ref.date)}
+                            </div>
+                        </div>
+                        <button onclick="openReference('${escapeHtml(ref.link)}')" 
+                                style="padding: 6px 12px; background: var(--brand-primary); color: white; 
+                                       border: none; border-radius: 4px; font-size: 12px; cursor: pointer;
+                                       transition: all 0.2s ease;"
+                                onmouseover="this.style.background='var(--brand-primary-hover)'"
+                                onmouseout="this.style.background='var(--brand-primary)'">
+                            메일 열기
+                        </button>
+                    `;
+                }
+                
+                refItem.onmouseenter = () => {
+                    refItem.style.background = 'var(--bg-hover)';
+                };
+                refItem.onmouseleave = () => {
+                    refItem.style.background = 'var(--bg-primary)';
+                };
+                
+                refContainer.appendChild(refItem);
+            });
+            
+            messageWrapper.appendChild(refContainer);
+        }
+
+        // Input Handling
+        function handleKeyPress(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function adjustTextareaHeight(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+        }
+
+        // Settings Panel Functions
+        function toggleSettings() {
+            const panel = document.getElementById('settings-panel');
+            panel.classList.toggle('active');
+            
+            // Load current settings when opening
+            if (panel.classList.contains('active')) {
+                loadSettings();
+            }
+        }
+
+        function saveSettings() {
+            const settings = {
+                qdrant: {
+                    host: document.getElementById('setting-qdrant-host').value,
+                    port: document.getElementById('setting-qdrant-port').value
+                },
+                ollama: {
+                    host: document.getElementById('setting-ollama-host').value,
+                    port: document.getElementById('setting-ollama-port').value
+                },
+                theme: {
+                    autoDarkMode: document.getElementById('auto-dark-mode').checked
+                }
+            };
+            
+            // Save to localStorage
+            localStorage.setItem('appSettings', JSON.stringify(settings));
+            
+            // Show success message
+            toastManager.show('설정이 저장되었습니다', 'success');
+            
+            // Apply settings
+            applySettings(settings);
+            
+            // Close panel
+            toggleSettings();
+        }
+
+        function loadSettings() {
+            const saved = localStorage.getItem('appSettings');
+            if (saved) {
+                const settings = JSON.parse(saved);
+                
+                // Load API settings
+                if (settings.qdrant) {
+                    document.getElementById('setting-qdrant-host').value = settings.qdrant.host || '127.0.0.1';
+                    document.getElementById('setting-qdrant-port').value = settings.qdrant.port || '6333';
+                }
+                
+                if (settings.ollama) {
+                    document.getElementById('setting-ollama-host').value = settings.ollama.host || '127.0.0.1';
+                    document.getElementById('setting-ollama-port').value = settings.ollama.port || '11434';
+                }
+                
+                // Load theme settings
+                if (settings.theme) {
+                    document.getElementById('auto-dark-mode').checked = settings.theme.autoDarkMode || false;
+                }
+            }
+        }
+
+        function applySettings(settings) {
+            // Apply auto dark mode if enabled
+            if (settings.theme && settings.theme.autoDarkMode) {
+                const hour = new Date().getHours();
+                const isDarkTime = hour < 6 || hour >= 18;
+                if (isDarkTime && !document.body.classList.contains('dark')) {
+                    toggleDarkMode();
+                } else if (!isDarkTime && document.body.classList.contains('dark')) {
+                    toggleDarkMode();
+                }
+            }
+            
+            // Update API endpoints (would need backend integration)
+            // This would typically send the new settings to the backend
+            updateBackendSettings(settings);
+        }
+
+        async function updateBackendSettings(settings) {
+            try {
+                const response = await fetch('/api/v2/system/config', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(settings)
+                });
+                
+                if (response.ok) {
+                    console.log('Backend settings updated successfully');
+                }
+            } catch (error) {
+                console.error('Failed to update backend settings:', error);
+            }
+        }
+
+        // Load settings on startup
+        document.addEventListener('DOMContentLoaded', function() {
+            const saved = localStorage.getItem('appSettings');
+            if (saved) {
+                applySettings(JSON.parse(saved));
+            }
+        });
+
+        // Clean up on page unload
+        window.addEventListener('beforeunload', () => {
+            chatManager.saveChats();
+            chatManager.stopAutoSave();
+        });
+    </script>
+
+    <!-- Settings Panel -->
+    <div id="settings-panel" class="settings-panel">
+        <div class="settings-header">
+            <h3>설정</h3>
+            <button class="close-settings" onclick="toggleSettings()">✕</button>
+        </div>
+        <div class="settings-content">
+            <!-- API 설정 섹션 -->
+            <div class="settings-section">
+                <h4>API 엔드포인트</h4>
+                <div class="settings-group">
+                    <label>
+                        Qdrant Host:
+                        <input type="text" id="setting-qdrant-host" value="127.0.0.1">
+                    </label>
+                    <label>
+                        Qdrant Port:
+                        <input type="text" id="setting-qdrant-port" value="6333">
+                    </label>
+                </div>
+                <div class="settings-group">
+                    <label>
+                        Ollama Host:
+                        <input type="text" id="setting-ollama-host" value="127.0.0.1">
+                    </label>
+                    <label>
+                        Ollama Port:
+                        <input type="text" id="setting-ollama-port" value="11434">
+                    </label>
+                </div>
+            </div>
+            
+            <!-- 테마 설정 섹션 -->
+            <div class="settings-section">
+                <h4>테마</h4>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="auto-dark-mode"> 
+                    자동 다크모드
+                </label>
+            </div>
+            
+            <!-- 저장 버튼 -->
+            <button class="save-settings-btn" onclick="saveSettings()">설정 저장</button>
+        </div>
+    </div>
+</body>
+</html>
