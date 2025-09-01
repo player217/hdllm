@@ -34,7 +34,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         )
         
         # Remove server header
-        response.headers.pop("Server", None)
+        try:
+            if hasattr(response.headers, 'pop'):
+                response.headers.pop("Server", None)
+            elif hasattr(response, 'headers') and "Server" in response.headers:
+                del response.headers["Server"]
+        except (AttributeError, KeyError):
+            # Skip server header removal if it fails
+            pass
         
         return response
 

@@ -50,6 +50,106 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------
 # 2. 전역 변수 및 설정
 # --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# 2.1 Dual Qdrant Router System
+# --------------------------------------------------------------------------
+class QdrantRouter:
+    """Dual Qdrant routing system for personal PC vs department server"""
+    
+    def __init__(self, config: 'AppConfig'):
+        self.config = config
+        self.clients = {}
+        self._init_dual_clients()
+    
+    def _init_dual_clients(self):
+        """Initialize both personal and department Qdrant clients"""
+        try:
+            # Personal PC client
+            personal_endpoint = self.config.get_qdrant_endpoint('personal')
+            self.clients['personal'] = QdrantClient(
+                host=personal_endpoint.host,
+                port=personal_endpoint.port,
+                timeout=personal_endpoint.timeout
+            )
+            logger.info(f"✅ Personal Qdrant client initialized: {personal_endpoint.host}:{personal_endpoint.port}")
+            
+            # Department server client
+            dept_endpoint = self.config.get_qdrant_endpoint('dept')
+            self.clients['dept'] = QdrantClient(
+                host=dept_endpoint.host,
+                port=dept_endpoint.port,
+                timeout=dept_endpoint.timeout
+            )
+            logger.info(f"✅ Department Qdrant client initialized: {dept_endpoint.host}:{dept_endpoint.port}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize dual Qdrant clients: {e}")
+            raise
+    
+    def get_client(self, scope: str = None, request: Request = None) -> QdrantClient:
+        """Get appropriate Qdrant client based on scope or request headers"""
+        # Priority 1: Explicit scope parameter
+        if scope in self.clients:
+            return self.clients[scope]
+        
+        # Priority 2: X-Qdrant-Scope header
+        if request and hasattr(request, 'headers'):
+            header_scope = request.headers.get('X-Qdrant-Scope', '').lower()
+            if header_scope in self.clients:
+                logger.info(f"🎯 Using {header_scope} Qdrant from X-Qdrant-Scope header")
+                return self.clients[header_scope]
+        
+        # Priority 3: Default fallback to personal
+        default_scope = os.getenv('DEFAULT_QDRANT_SCOPE', 'personal')
+        if default_scope in self.clients:
+            logger.debug(f"📍 Using default {default_scope} Qdrant client")
+            return self.clients[default_scope]
+        
+        # Ultimate fallback
+        return list(self.clients.values())[0] if self.clients else None
+    
+    def health_check(self) -> dict:
+        """Check health of both Qdrant instances"""
+        status = {}
+        for scope, client in self.clients.items():
+            try:
+                collections = client.get_collections()
+                status[scope] = {
+                    'status': 'healthy',
+                    'collections': len(collections.collections),
+                    'endpoint': f"{scope} Qdrant"
+                }
+            except Exception as e:
+                status[scope] = {
+                    'status': 'unhealthy',
+                    'error': str(e),
+                    'endpoint': f"{scope} Qdrant"
+                }
+        return status
+    
+    async def get_aggregated_status(self) -> dict:
+        """Get aggregated status for dual routing system"""
+        try:
+            status = self.health_check()
+            
+            # Calculate overall health
+            healthy_count = sum(1 for s in status.values() if s.get('status') == 'healthy')
+            total_count = len(status)
+            
+            return {
+                'dual_routing_enabled': True,
+                'available_scopes': list(self.clients.keys()),
+                'healthy_instances': f"{healthy_count}/{total_count}",
+                'detailed_status': status,
+                'overall_status': 'healthy' if healthy_count == total_count else 'degraded' if healthy_count > 0 else 'unhealthy'
+            }
+        except Exception as e:
+            return {
+                'dual_routing_enabled': False,
+                'error': str(e),
+                'overall_status': 'error'
+            }
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 EMBEDDING_MODEL_DEFAULT_PATH = PROJECT_ROOT / "src" / "bin" / "bge-m3-local"
 
@@ -275,6 +375,14 @@ async def lifespan(app: FastAPI):
                 "mail": QdrantClient(host=config.MAIL_QDRANT_HOST, port=config.MAIL_QDRANT_PORT),
                 "doc": QdrantClient(host=config.DOC_QDRANT_HOST, port=config.DOC_QDRANT_PORT)
             }
+        
+        # Initialize Dual Qdrant Router (for personal/department routing)
+        try:
+            app_state["qdrant_router"] = QdrantRouter(config)
+            logger.info("✅ Dual Qdrant Router initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Dual Qdrant Router: {e}")
+            app_state["qdrant_router"] = None
         
         # 보안·분리 컬렉션 상태 확인 (ResourceManager 통합)
         if DEBUG_MODE:
@@ -1304,11 +1412,14 @@ async def open_mail(request: Request):
 
 @app.options("/ask")
 async def ask_options():
-    """OPTIONS preflight handler for /ask endpoint"""
+    """OPTIONS preflight handler for /ask endpoint - simplified for CORS preflight"""
     return Response(
         status_code=200,
         headers={
-            "Allow": "POST, OPTIONS"
+            "Allow": "POST, OPTIONS",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, X-Qdrant-Scope",
+            "Access-Control-Max-Age": "86400"  # Cache preflight for 24 hours
         }
     )
 
@@ -1514,7 +1625,16 @@ async def ask_legacy(ask_request: AskRequest, request: Request):
         logger.info(f"[{request_id}] 📨 Legacy Question: {ask_request.query}")
         logger.info(f"[{request_id}] 📁 Source: {ask_request.source.value}")
         
-        client = app_state["qdrant_clients"][ask_request.source.value]
+        # Try dual routing first, fallback to legacy
+        router = app_state.get("qdrant_router")
+        if router:
+            client = router.get_client(request=request)
+            scope = getattr(request.state, 'scope', 'personal')
+            logger.info(f"[{request_id}] 🎯 Using dual routing - Scope: {scope}")
+        else:
+            # Fallback to legacy routing
+            client = app_state["qdrant_clients"][ask_request.source.value]
+            logger.info(f"[{request_id}] 📍 Using legacy routing - Source: {ask_request.source.value}")
         context_text, references = search_qdrant(ask_request.query, request_id, client, config, ask_request.source.value, request)
         
         if not context_text:

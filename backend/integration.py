@@ -52,7 +52,7 @@ if not ALLOW_METHODS:
 
 ALLOW_HEADERS = _parse_csv_env("ALLOW_HEADERS")
 if not ALLOW_HEADERS:
-    ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Request-ID"]
+    ALLOW_HEADERS = ["Content-Type", "Authorization", "X-Request-ID", "X-Qdrant-Scope"]
 
 TRUSTED_HOSTS = _parse_csv_env("TRUSTED_HOSTS")
 if not TRUSTED_HOSTS:

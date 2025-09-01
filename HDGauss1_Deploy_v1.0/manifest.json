@@ -1,0 +1,142 @@
+{
+  "name": "HDGauss1_Deploy",
+  "version": "1.0.0", 
+  "description": "HD현대미포 Gauss-1 RAG System - Docker 불가 PC용 완전 독립 실행형 배포판",
+  "build_info": {
+    "build_date": "2025-09-01",
+    "build_target": "standalone_windows",
+    "build_env": "production",
+    "builder": "claude-code"
+  },
+  "system_requirements": {
+    "os": "Windows 10/11 (64-bit)",
+    "ram_min": "8 GB",
+    "ram_recommended": "16 GB", 
+    "disk_space": "20 GB",
+    "cpu": "Intel i5 or equivalent",
+    "network": "Optional (for model downloads)"
+  },
+  "components": {
+    "backend": {
+      "files": ["main.py", "resource_manager.py", "security.py", "security_config.py"],
+      "dependencies": "requirements.lock.txt",
+      "description": "FastAPI 서버 (최소 구성)"
+    },
+    "frontend": {
+      "files": ["index.html", "favicon.ico"], 
+      "description": "웹 UI 인터페이스"
+    },
+    "gui": {
+      "files": ["HDLLM.py", "ui_user_tab.py"],
+      "description": "PySide6 GUI 애플리케이션"
+    },
+    "binaries": {
+      "python": "bin/python311/python.exe",
+      "qdrant": "bin/qdrant/qdrant.exe",
+      "ollama": "bin/ollama/ollama.exe",
+      "description": "필수 실행 파일들"
+    },
+    "models": {
+      "embeddings": "models/embeddings/bge-m3/",
+      "llm": "models/ollama/gemma3-4b/", 
+      "description": "AI 모델 캐시 (선택적 동봉)"
+    }
+  },
+  "ports": {
+    "backend_api": 8080,
+    "frontend_web": 8001, 
+    "qdrant": 6333,
+    "qdrant_grpc": 6334,
+    "ollama": 11434
+  },
+  "scripts": {
+    "run.bat": "메인 실행 스크립트 (전체 시스템 시작)",
+    "run_gui_debug.bat": "GUI 디버그 모드 (에러 로그 캡처)",
+    "stop.bat": "전체 서비스 중지",
+    "run_qdrant.bat": "Qdrant 단독 테스트",
+    "run_ollama.bat": "Ollama 단독 테스트",
+    "self_check.ps1": "시스템 자가 진단"
+  },
+  "configuration": {
+    "env_file": ".env",
+    "qdrant_config": "bin/qdrant/qdrant.yaml",
+    "dual_routing": "personal (로컬) + department (원격)",
+    "default_scope": "personal"
+  },
+  "features": {
+    "standalone": true,
+    "docker_free": true,
+    "offline_capable": true,
+    "dual_qdrant_routing": true,
+    "embedded_python": true,
+    "model_caching": true,
+    "gui_interface": true,
+    "web_interface": true,
+    "api_interface": true
+  },
+  "file_checksums": {
+    "_note": "SHA256 해시값들 (실제 배포 시 계산)",
+    "scripts/run.bat": "TBD",
+    "backend/main.py": "TBD", 
+    "src/HDLLM.py": "TBD",
+    ".env": "TBD",
+    "bin/qdrant/qdrant.yaml": "TBD"
+  },
+  "installation": {
+    "steps": [
+      "1. 압축 파일을 원하는 위치에 해제",
+      "2. scripts\\install_offline.ps1 실행 (선택사항)",
+      "3. scripts\\run.bat 실행",
+      "4. GUI 또는 웹 인터페이스 사용"
+    ],
+    "first_run": [
+      "임베딩 모델 자동 다운로드 (인터넷 연결 시)",
+      "Gemma3:4b 모델 다운로드 (약 2.5GB)",
+      "Qdrant 데이터베이스 초기화"
+    ]
+  },
+  "troubleshooting": {
+    "common_issues": [
+      "GUI 실행 안됨 → run_gui_debug.bat 실행",
+      "포트 충돌 → stop.bat 후 재실행",
+      "모델 미발견 → 환경변수 확인",
+      "권한 오류 → 관리자 권한으로 실행"
+    ],
+    "log_locations": [
+      "logs/gui_debug.log",
+      "logs/backend.log", 
+      "logs/qdrant.log"
+    ]
+  },
+  "support": {
+    "documentation": "README_DEPLOY.md",
+    "diagnostics": "scripts/self_check.ps1",
+    "contact": "HD현대미포 선각기술부"
+  },
+  "license": {
+    "main": "Proprietary - HD현대미포 내부용",
+    "third_party": [
+      "Python: PSF License",
+      "FastAPI: MIT License", 
+      "Qdrant: Apache 2.0",
+      "Ollama: MIT License",
+      "BGE-M3: MIT License",
+      "Gemma: Apache 2.0"
+    ]
+  },
+  "changelog": {
+    "1.0.0": [
+      "초기 독립 실행형 배포판 릴리스",
+      "듀얼 Qdrant 라우팅 지원",
+      "임베디드 Python 3.11 통합",
+      "오프라인 모델 캐싱 지원",
+      "포괄적인 관리 스크립트 제공"
+    ]
+  },
+  "package_info": {
+    "total_size_estimated": "15-20 GB",
+    "compressed_size_estimated": "8-12 GB",
+    "installation_time": "10-15 minutes",
+    "first_run_time": "5-30 minutes (모델 다운로드 포함)"
+  }
+}

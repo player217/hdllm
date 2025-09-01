@@ -1,200 +1,348 @@
-# LLM RAG 시스템 설치 및 실행 가이드
+# HD현대미포 Gauss-1 RAG System - 포터블 설치 가이드
+
+> **버전**: 3.0 - Portable & Smart Deployment Ready  
+> **작성일**: 2025-08-31  
+> **대상**: HD현대미포 선각기술부 및 시스템 관리자
 
 ## 시스템 개요
 
-이 시스템은 메일과 문서를 분리하여 관리하는 RAG(Retrieval-Augmented Generation) 시스템입니다.
+### 🎯 주요 개선사항 (v3.0)
+- **원클릭 설치**: PowerShell 스크립트로 완전 자동화
+- **포터블 배포**: 어떤 PC·어떤 경로에서도 실행 가능
+- **스마트 전환**: 원격/로컬 Qdrant 자동 전환
+- **경로 독립**: 설치 경로에 관계없이 동작
+- **안전 종료**: 데이터 무결성 보장
 
-### 주요 특징
-- **메일/문서 분리 아키텍처**: 메일은 개인 PC 로컬 Qdrant, 문서는 부서 대표 PC Qdrant 사용
-- **GUI 프로그램**: 메일/문서 임베딩을 위한 데스크톱 애플리케이션
-- **웹 인터페이스**: FastAPI 백엔드 + HTML 프론트엔드
-- **유연한 파서 시스템**: 선각계열회의록 전용 파서 및 일반 문서 파서 지원
-
-## 1. 사전 요구사항
-
-### 필수 소프트웨어
-- Python 3.11 이상
-- Ollama (LLM 서버)
-- Microsoft Office (Outlook 연동 시 필요)
-
-### 다운로드 필요 파일
-- `qdrant.exe`: Qdrant 벡터 데이터베이스 실행 파일
-- `bge-m3-local`: 임베딩 모델 (HuggingFace에서 다운로드)
-- `kobart-local`: 한국어 요약 모델 (선택사항)
-
-## 2. 설치 방법
-
-### 자동 설치 (권장)
-```batch
-INSTALL.bat
+### 🏗️ 아키텍처
+```
+LMM_UI_APP/
+├── scripts/          # 실행 스크립트
+│   ├── install.ps1   # PowerShell 자동 설치
+│   ├── run.bat       # 스마트 실행기
+│   └── stop.bat      # 안전 종료기
+├── bin/              # 포터블 바이너리 (자동 다운로드)
+│   ├── python311/    # Python 임베디드
+│   ├── qdrant/       # Qdrant 서버
+│   └── ollama/       # Ollama (선택사항)
+├── data/             # 데이터 저장소
+│   └── qdrant/       # 벡터 데이터
+├── venv/             # Python 가상환경
+└── .env              # 환경 설정
 ```
 
-### 수동 설치
-```bash
-# 1. pip 업그레이드
-python -m pip install --upgrade pip
+---
 
-# 2. 필수 패키지 설치
+## 📋 목차
+1. [시스템 개요](#시스템-개요)
+2. [설치 전 준비사항](#설치-전-준비사항)
+3. [자동 설치 (권장)](#자동-설치-권장)
+4. [수동 설치](#수동-설치)
+5. [실행 및 사용법](#실행-및-사용법)
+6. [설정 가이드](#설정-가이드)
+7. [문제 해결](#문제-해결)
+8. [고급 설정](#고급-설정)
+
+---
+
+## 설치 전 준비사항
+
+### ⚡ 최소 시스템 요구사항
+- **OS**: Windows 10/11 (64-bit)
+- **RAM**: 8GB 이상 (권장: 16GB)
+- **저장공간**: 10GB 이상 여유공간
+- **네트워크**: 인터넷 연결 (초기 설치 시)
+
+### 🔧 선택사항
+- **GPU**: CUDA 지원 그래픽카드 (성능 향상)
+- **Ollama**: 로컬 LLM 서비스 (별도 설치)
+
+---
+
+## 자동 설치 (권장)
+
+### 🚀 원클릭 설치
+
+#### 1단계: PowerShell 실행
+```powershell
+# 관리자 권한으로 PowerShell 실행
+# Windows + X → "Windows PowerShell(관리자)"
+```
+
+#### 2단계: 실행 정책 설정 (최초 1회)
+```powershell
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+```
+
+#### 3단계: 자동 설치 실행
+```powershell
+# 프로젝트 폴더로 이동
+cd "C:\Users\lseun\Documents\LMM_UI_APP"
+
+# 자동 설치 실행
+.\scripts\install.ps1
+```
+
+### 📦 설치 과정
+1. **환경 검사**: 시스템 요구사항 확인
+2. **Python 설치**: Python 3.11 임베디드 버전 다운로드
+3. **가상환경 구성**: venv 생성 및 패키지 설치
+4. **Qdrant 설치**: 포터블 Qdrant 바이너리 다운로드
+5. **설정 구성**: .env 파일 생성 및 최적화
+6. **서비스 테스트**: 모든 컴포넌트 동작 확인
+
+### ✅ 설치 완료 확인
+```
+✅ Python 3.11 임베디드 설치 완료
+✅ 가상환경 생성 및 패키지 설치 완료
+✅ Qdrant 서버 설치 완료
+✅ 환경 설정 구성 완료
+✅ 모든 컴포넌트 테스트 통과
+
+🎉 설치가 완료되었습니다!
+실행: scripts\run.bat
+```
+
+---
+
+## 수동 설치
+
+### 🔧 고급 사용자용
+
+#### 1. Python 환경 구성
+```bash
+# Python 가상환경 생성
+python -m venv venv
+
+# 가상환경 활성화
+venv\Scripts\activate.bat
+
+# 패키지 설치
 pip install -r requirements.txt
-
-# 3. 폴더 구조 생성
-mkdir src\bin
-mkdir chunk_outputs
-mkdir email_attachments
 ```
 
-### 모델 파일 복사
-```
-src/bin/
-├── qdrant.exe           # Qdrant 실행 파일
-├── bge-m3-local/        # 임베딩 모델 폴더
-│   ├── config.json
-│   ├── model.safetensors
-│   └── ...
-└── kobart-local/        # 요약 모델 폴더 (선택사항)
-    ├── config.json
-    ├── pytorch_model.bin
-    └── ...
-```
-
-## 3. 환경 설정
-
-### 환경 변수 설정
-
-#### 메일 전용 환경
-```batch
-set RAG_MAIL_QDRANT_HOST=127.0.0.1
-set RAG_MAIL_QDRANT_PORT=6333
-set RAG_DOC_QDRANT_HOST=192.168.1.100  # 부서 대표 PC IP
-set RAG_DOC_QDRANT_PORT=6333
-```
-
-#### 문서 전용 환경 (부서 대표 PC)
-```batch
-set RAG_MAIL_QDRANT_HOST=127.0.0.1
-set RAG_MAIL_QDRANT_PORT=6333
-set RAG_DOC_QDRANT_HOST=127.0.0.1
-set RAG_DOC_QDRANT_PORT=6333
-```
-
-### config.json 설정
-```json
-{
-    "mail_qdrant_path": "C:\\Users\\사용자\\Documents\\qdrant_mail",
-    "doc_qdrant_path": "C:\\Users\\사용자\\Documents\\qdrant_document"
-}
-```
-
-## 4. 실행 방법
-
-### GUI 프로그램 실행
-```batch
-RUN.bat
-```
-또는
+#### 2. Qdrant 설치
 ```bash
-python src\HDLLM.py
+# Qdrant 다운로드 (수동)
+# https://github.com/qdrant/qdrant/releases
+# bin\qdrant\qdrant.exe에 압축해제
 ```
 
-### 웹 서버 실행
-
-#### 개별 실행
-```batch
-# 터미널 1: 백엔드
-run_backend.bat
-
-# 터미널 2: 프론트엔드
-run_frontend.bat
-```
-
-#### 통합 실행
+#### 3. 환경 설정
 ```bash
-# 메일 모드
-python run_all.py --service_type=mail
+# .env.example을 .env로 복사
+copy .env.example .env
 
-# 문서 모드
-python run_all.py --service_type=doc
+# 필요한 설정 수정
+notepad .env
 ```
 
-## 5. 사용 방법
+---
 
-### GUI 프로그램 사용
+## 실행 및 사용법
 
-1. **Qdrant 서버 시작**
-   - 저장 경로 설정
-   - "실행" 버튼 클릭
+### 🎮 시스템 실행
 
-2. **메일 임베딩**
-   - Outlook 연결
-   - 처리할 폴더 선택
-   - "이어서 임베딩" 또는 "새롭게 임베딩" 클릭
-
-3. **문서 임베딩**
-   - 문서 폴더 선택
-   - 파서 선택 (선각계열회의록 또는 일반문서)
-   - 청킹 옵션 설정
-   - "이어서 임베딩" 또는 "새롭게 임베딩" 클릭
-
-### 웹 인터페이스 사용
-
-1. 브라우저에서 http://localhost:8001 접속
-2. 소스 선택 (메일/문서)
-3. 질문 입력
-4. 답변 및 관련 문서 확인
-
-## 6. 테스트 및 검증
-
-### 통합 테스트 실행
+#### 기본 실행
 ```bash
-python test_integration.py
+# 메인 디렉토리에서
+scripts\run.bat
 ```
 
-### 서비스 상태 확인
-- FastAPI: http://localhost:8080/docs
-- Ollama: http://localhost:11434
-- Qdrant: http://localhost:6333/dashboard
+#### 실행 과정
+1. **환경 변수 로드**: .env 파일 읽기
+2. **가상환경 활성화**: Python venv 활성화
+3. **Qdrant 연결**: 스마트 모드 선택
+   - 원격 서버 연결 시도
+   - 실패 시 로컬 서버 시작
+4. **Ollama 확인**: LLM 서비스 상태 점검
+5. **백엔드 시작**: FastAPI 서버 (포트 8080)
+6. **프론트엔드 시작**: 웹 서버 (포트 8001)
+7. **GUI 실행**: 선택적 데스크톱 애플리케이션
 
-## 7. 문제 해결
+### 🌐 웹 인터페이스 접속
+- **메인 페이지**: http://localhost:8001
+- **API 문서**: http://localhost:8080/docs
+- **시스템 상태**: http://localhost:8080/status
 
-### 일반적인 문제
+### 🛑 시스템 종료
+```bash
+scripts\stop.bat
+```
 
-1. **"Python이 설치되어 있지 않습니다"**
-   - Python 3.11 이상 설치
-   - 환경 변수 PATH에 Python 추가
+---
 
-2. **"모듈을 찾을 수 없습니다"**
-   - `INSTALL.bat` 실행
-   - 또는 `pip install -r requirements.txt`
+## 설정 가이드
 
-3. **Qdrant 실행 실패**
-   - `src/bin/qdrant.exe` 파일 확인
-   - 포트 6333이 사용 중인지 확인
+### 🎛️ 주요 설정 (.env)
 
-4. **임베딩 모델 로드 실패**
-   - `src/bin/bge-m3-local` 폴더 확인
-   - 모델 파일 완전성 확인
+#### Qdrant 모드 설정
+```bash
+# 자동 모드 (권장) - 원격 우선, 실패 시 로컬
+QDRANT_MODE=auto
 
-### 로그 확인
-- 임베딩 로그: `embedding_log_mail.txt`, `embedding_log_doc.txt`
-- 청크 출력: `chunk_outputs/` 폴더
+# 강제 로컬 모드 - 항상 로컬 서버 사용
+QDRANT_MODE=local
 
-## 8. 고급 설정
+# 강제 원격 모드 - 항상 원격 서버 사용
+QDRANT_MODE=remote
+```
 
-### 파서 추가
-1. `src/parsers/` 폴더에 새 파서 파일 생성
-2. `_parse_workbook` 함수 구현
-3. HDLLM.py의 `DOCUMENT_PARSERS` 딕셔너리에 추가
+#### 원격 서버 설정
+```bash
+# 부서 공용 서버
+REMOTE_QDRANT_HOST=10.150.104.37
+REMOTE_QDRANT_PORT=6333
 
-### 네트워크 설정
-- 방화벽에서 포트 허용: 8080, 8001, 6333, 11434
-- 부서 대표 PC의 Qdrant는 네트워크 접근 허용 필요
+# 연결 테스트 설정
+CONNECTION_TIMEOUT=5
+RETRY_ATTEMPTS=3
+```
 
-### 성능 최적화
-- `QDRANT_BATCH_SIZE`: 배치 크기 조정 (기본값: 128)
-- 청크 크기/중첩 조정으로 검색 품질 개선
+#### 포트 설정
+```bash
+# 웹 서버 포트
+APP_PORT=8080
+FRONTEND_PORT=8001
 
-## 9. 보안 주의사항
+# 로컬 Qdrant 포트
+LOCAL_QDRANT_PORT=6333
+```
 
-- 민감한 정보가 포함된 메일/문서는 로컬에만 저장
-- 네트워크 Qdrant 사용 시 접근 제어 설정
-- preprocessing_rules.json으로 PII 마스킹 규칙 설정 가능
+#### LLM 모델 설정
+```bash
+# Ollama 모델 (자동 다운로드)
+OLLAMA_MODEL=gemma3:4b
+OLLAMA_AUTO_PULL=true
+
+# 대안 모델들
+# OLLAMA_MODEL=llama3.2:3b
+# OLLAMA_MODEL=mistral:7b
+# OLLAMA_MODEL=qwen2.5:7b
+```
+
+---
+
+## 문제 해결
+
+### ❓ 자주 발생하는 문제
+
+#### 1. PowerShell 실행 정책 오류
+```
+오류: 이 시스템에서 스크립트를 실행할 수 없습니다.
+해결: Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
+```
+
+#### 2. 포트 충돌
+```
+오류: 포트 8080이 이미 사용 중입니다.
+해결: 
+1. netstat -ano | findstr :8080
+2. taskkill /PID [PID번호] /F
+3. 또는 .env에서 포트 변경
+```
+
+#### 3. Qdrant 연결 실패
+```
+오류: 원격 Qdrant 서버에 연결할 수 없습니다.
+해결:
+1. 네트워크 연결 확인
+2. 방화벽 설정 확인
+3. QDRANT_MODE=local로 변경
+```
+
+#### 4. Python 가상환경 오류
+```
+오류: 가상환경을 찾을 수 없습니다.
+해결:
+1. scripts\install.ps1 재실행
+2. 또는 수동 가상환경 생성
+```
+
+### 🔍 로그 확인
+
+#### 로그 위치
+- **애플리케이션**: `logs/app.log`
+- **에러 로그**: `logs/error.log`
+- **백엔드 로그**: `backend/logs/`
+
+#### 로그 레벨 조정
+```bash
+# .env 파일
+LOG_LEVEL=DEBUG  # CRITICAL, ERROR, WARNING, INFO, DEBUG
+```
+
+---
+
+## 고급 설정
+
+### 🔐 보안 설정
+
+#### API 보안
+```bash
+# API 키 활성화
+API_KEY_ENABLED=true
+API_KEY=your-secure-api-key-here
+
+# CORS 제한
+ALLOWED_ORIGINS=http://localhost:8001,http://127.0.0.1:8001
+```
+
+#### PII 보호
+```bash
+# 개인정보 마스킹
+PII_MASKING_ENABLED=true
+PII_PATTERNS_FILE=./config/pii_patterns.json
+```
+
+### ⚡ 성능 튜닝
+
+#### GPU 가속 (CUDA)
+```bash
+# 디바이스 설정
+EMBED_DEVICE=cuda  # cpu | cuda | cuda:0
+
+# 배치 크기 증가
+EMBED_BATCH_SIZE=64  # GPU 사용 시 증가 권장
+```
+
+#### Qdrant 최적화
+```bash
+# HNSW 파라미터
+QDRANT_HNSW_EF=128
+QDRANT_EXACT=false
+QDRANT_SEARCH_LIMIT=10
+QDRANT_SCORE_THRESHOLD=0.3
+```
+
+---
+
+## 📞 지원 및 문의
+
+### 🏢 HD현대미포 선각기술부
+- **담당 부서**: 선각기술부
+- **시스템 관리자**: 내부 문의
+- **기술 문서**: 프로젝트 CLAUDE.md 참조
+
+### 📚 추가 자료
+- **API 문서**: http://localhost:8080/docs
+- **프로젝트 README**: README.md
+- **설정 템플릿**: .env.example
+
+### 🔧 업데이트
+- **현재 버전**: 3.0
+- **다음 업데이트**: 기능 개선 시 자동 안내
+- **업데이트 방법**: scripts\install.ps1 재실행
+
+---
+
+> **설치 완료 후 첫 실행 시**  
+> 1. `scripts\run.bat` 실행  
+> 2. 브라우저에서 http://localhost:8001 접속  
+> 3. "선각기술부는 무엇인가요?" 질문으로 테스트  
+>   
+> **문제 발생 시**  
+> 1. `logs/` 폴더의 로그 파일 확인  
+> 2. `scripts\stop.bat`로 전체 종료 후 재시작  
+> 3. 해결되지 않으면 `scripts\install.ps1` 재실행
+
+**🎉 HD현대미포 Gauss-1 RAG System에 오신 것을 환영합니다!**
