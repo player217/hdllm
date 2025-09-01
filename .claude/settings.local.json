@@ -11,7 +11,10 @@
       "mcp__playwright__browser_take_screenshot",
       "Bash(git add:*)",
       "Bash(git push:*)",
-      "Bash(dir /b C:UserslseunDocumentsLMM_UI_APP)"
+      "Bash(dir /b C:UserslseunDocumentsLMM_UI_APP)",
+      "mcp__playwright__browser_wait_for",
+      "Bash(git commit:*)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []

@@ -1412,11 +1412,14 @@ async def open_mail(request: Request):
 
 @app.options("/ask")
 async def ask_options():
-    """OPTIONS preflight handler for /ask endpoint"""
+    """OPTIONS preflight handler for /ask endpoint - simplified for CORS preflight"""
     return Response(
         status_code=200,
         headers={
-            "Allow": "POST, OPTIONS"
+            "Allow": "POST, OPTIONS",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, X-Qdrant-Scope",
+            "Access-Control-Max-Age": "86400"  # Cache preflight for 24 hours
         }
     )
 

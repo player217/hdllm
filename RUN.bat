@@ -118,17 +118,17 @@ if not defined BPID (
     REM 환경 파일 우선순위
     if exist ".env" (
         if "%DEBUG_MODE%"=="true" (
-            start "Backend API (Debug)" cmd /k "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload --env-file ..\.env --log-level debug"
+            start "Backend API (Debug)" cmd /k "cd /d "%ROOT%" && call venv\Scripts\activate.bat && cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload --env-file ..\.env --log-level debug"
             echo    -^> Backend API 시작됨 (DEBUG 모드)
         ) else (
-            start "Backend API" cmd /c "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload --env-file ..\.env"
+            start "Backend API" cmd /c "cd /d "%ROOT%" && call venv\Scripts\activate.bat && cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload --env-file ..\.env"
             echo    -^> Backend API 시작됨 (PRODUCTION 모드)
         )
     ) else if exist ".env.test" (
-        start "Backend API" cmd /c "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload --env-file ..\.env.test"
+        start "Backend API" cmd /c "cd /d "%ROOT%" && call venv\Scripts\activate.bat && cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload --env-file ..\.env.test"
         echo    -^> Backend API 시작됨 (.env.test)
     ) else (
-        start "Backend API" cmd /c "cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload"
+        start "Backend API" cmd /c "cd /d "%ROOT%" && call venv\Scripts\activate.bat && cd backend && python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload"
         echo    -^> Backend API 시작됨 (기본 설정)
     )
     
@@ -143,7 +143,7 @@ echo [7/7] Frontend 웹 서버 시작...
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8001" ^| findstr "LISTENING"') do set FPID=%%p
 if not defined FPID (
     echo    -^> 웹 서버 시작 중 (포트 8001)...
-    start "Frontend Server" cmd /c "cd frontend && python -m http.server 8001"
+    start "Frontend Server" cmd /c "cd /d "%ROOT%" && call venv\Scripts\activate.bat && cd frontend && python -m http.server 8001"
     timeout /t 2 /nobreak >nul
 ) else (
     echo    -^> Frontend 이미 실행 중 (PID: !FPID!)
