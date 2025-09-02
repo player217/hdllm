@@ -1530,7 +1530,24 @@
                 
                 // Render all messages
                 chat.messages.forEach(msg => {
-                    this.renderMessage(msg.role, msg.content);
+                    console.log('🔄 [DEBUG] Restoring chat message:', { role: msg.role, content: msg.content.substring(0, 50) });
+                    const result = addMessage(msg.role, msg.content);
+                    
+                    // 🔗 참고자료 복원: assistant 메시지에 references가 있으면 복원
+                    if (msg.role === 'assistant' && msg.references && msg.references.length > 0) {
+                        console.log('🔗 [DEBUG] Restoring references for assistant message:', msg.references.length, 'references');
+                        
+                        // 메시지 그룹 찾기
+                        const messageGroups = document.querySelectorAll('.message-group[data-role="assistant"]');
+                        const currentMessageGroup = messageGroups[messageGroups.length - 1];
+                        
+                        if (currentMessageGroup) {
+                            appendReferences(currentMessageGroup, msg.references);
+                            console.log('✅ [DEBUG] References restored successfully');
+                        } else {
+                            console.warn('⚠️ [DEBUG] Could not find message group to restore references');
+                        }
+                    }
                 });
                 
                 // Scroll to bottom
@@ -1659,6 +1676,54 @@
                     clearInterval(this.autoSaveInterval);
                     this.autoSaveInterval = null;
                 }
+            }
+            
+            // 🔑 핵심 수정: 마지막 AI 메시지 내용 업데이트
+            updateLastAssistantMessage(content) {
+                const chat = this.getCurrentChat();
+                if (!chat || chat.messages.length === 0) {
+                    console.warn('⚠️ [DEBUG] No chat or messages found for updateLastAssistantMessage');
+                    return;
+                }
+                
+                // 마지막 메시지를 뒤에서부터 찾아서 assistant 메시지 업데이트
+                for (let i = chat.messages.length - 1; i >= 0; i--) {
+                    if (chat.messages[i].role === 'assistant') {
+                        console.log('🔄 [DEBUG] Updating assistant message at index', i, 'with content length:', content.length);
+                        chat.messages[i].content = content;
+                        chat.messages[i].timestamp = new Date().toISOString();
+                        chat.updatedAt = new Date().toISOString();
+                        this.saveChats();
+                        console.log('✅ [DEBUG] Assistant message content updated successfully');
+                        return;
+                    }
+                }
+                
+                console.warn('⚠️ [DEBUG] No assistant message found to update');
+            }
+            
+            // 🔗 참고자료 저장: 마지막 AI 메시지에 참고자료 추가
+            updateLastAssistantMessageReferences(references) {
+                const chat = this.getCurrentChat();
+                if (!chat || chat.messages.length === 0) {
+                    console.warn('⚠️ [DEBUG] No chat or messages found for updateLastAssistantMessageReferences');
+                    return;
+                }
+                
+                // 마지막 메시지를 뒤에서부터 찾아서 assistant 메시지에 references 추가
+                for (let i = chat.messages.length - 1; i >= 0; i--) {
+                    if (chat.messages[i].role === 'assistant') {
+                        console.log('🔗 [DEBUG] Adding references to assistant message at index', i, 'references count:', references.length);
+                        chat.messages[i].references = references;
+                        chat.messages[i].timestamp = new Date().toISOString();
+                        chat.updatedAt = new Date().toISOString();
+                        this.saveChats();
+                        console.log('✅ [DEBUG] References added to assistant message successfully');
+                        return;
+                    }
+                }
+                
+                console.warn('⚠️ [DEBUG] No assistant message found to add references');
             }
         }
         
@@ -1941,7 +2006,7 @@
             
             // Update status display
             const statusText = scope === 'personal' ? '개인 DB 사용중' : '부서 DB 사용중';
-            toastManager.show(`데이터 소스 변경: ${statusText}`, 'info');
+            toastManager.show({ message: `데이터 소스 변경: ${statusText}`, type: 'info' });
         }
 
         // Polling Control Utilities
@@ -2090,14 +2155,14 @@
             
             if (personalBadge && deptBadge) {
                 // Update personal Qdrant status (boolean → badge state)
-                const personalStatus = status.qdrant_mail ? 'connected' : 'disconnected';
+                const personalStatus = status.qdrant_mail ? 'ok' : 'fail';
                 updateBadgeStatus(personalBadge, personalStatus, {
                     host: '127.0.0.1:6333',
                     name: '개인 Qdrant'
                 });
                 
                 // Update department Qdrant status (boolean → badge state)
-                const deptStatus = status.qdrant_doc ? 'connected' : 'disconnected';
+                const deptStatus = status.qdrant_doc ? 'ok' : 'fail';
                 updateBadgeStatus(deptBadge, deptStatus, {
                     host: '10.150.104.37:6333', 
                     name: '부서 Qdrant'
@@ -2193,6 +2258,8 @@
         }
 
         function addMessage(role, content, messageId = null) {
+            console.log('🎨 [DEBUG] addMessage called:', { role, content: content.substring(0, 50), messageId });
+            
             // Generate message ID for assistant messages
             if (role === 'assistant' && !messageId) {
                 messageId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -2203,6 +2270,10 @@
             
             // Render message
             const messagesContainer = document.getElementById('messages-container');
+            if (!messagesContainer) {
+                console.error('❌ [DEBUG] messages-container not found!');
+                return null;
+            }
             
             // Create message group if needed
             let messageGroup = messagesContainer.lastElementChild;
@@ -2259,6 +2330,14 @@
             // Scroll to bottom
             const chatContainer = document.getElementById('chat-container');
             chatContainer.scrollTop = chatContainer.scrollHeight;
+            
+            console.log('🎯 [DEBUG] addMessage completed successfully:', {
+                role, 
+                messageId, 
+                contentDiv: contentDiv,
+                messageGroup: messageGroup,
+                isVisible: messageDiv.offsetParent !== null
+            });
             
             return { contentDiv: contentDiv, messageId: messageId };
         }
@@ -2331,12 +2410,14 @@
 
         // Stream Response
         async function streamResponse(question) {
+            console.log('🚀 [DEBUG] streamResponse started for question:', question);
             isStreaming = true;
             pauseStatusPoll(); // Pause status polling during streaming
             document.getElementById('send-btn').disabled = true;
             
             // Add typing indicator
             addTypingIndicator();
+            console.log('⏳ [DEBUG] Typing indicator added');
             
             let timeoutId = null;
             const TIMEOUT_DURATION = 120000; // 2 minutes timeout for long responses
@@ -2420,11 +2501,17 @@
                 const decoder = new TextDecoder();
                 let accumulatedText = '';
                 
+                console.log('🚀 [DEBUG] Starting streaming response, messageCreated:', messageCreated);
+                
                 while (true) {
                     const { done, value } = await reader.read();
-                    if (done) break;
+                    if (done) {
+                        console.log('🏁 [DEBUG] Streaming completed');
+                        break;
+                    }
                     
                     const chunk = decoder.decode(value, { stream: true });
+                    console.log('📦 [DEBUG] Received chunk:', chunk.substring(0, 100) + (chunk.length > 100 ? '...' : ''));
                     const lines = chunk.split('\n');
                     
                     for (const raw of lines) {
@@ -2436,17 +2523,23 @@
                         
                         try {
                             const data = JSON.parse(jsonStr);
+                            console.log('🔍 [DEBUG] Parsed response data:', data);
                             
                             // 백엔드 키명: answer_chunk / references
                             if (data.answer_chunk) {
+                                console.log('📝 [DEBUG] Received answer chunk:', data.answer_chunk);
+                                
                                 // Create message only on first response chunk
                                 if (!messageCreated) {
+                                    console.log('🆕 [DEBUG] Creating new assistant message');
                                     removeTypingIndicator();
                                     
                                     // Now create the actual message
                                     const result = addMessage('assistant', '');
                                     messageContent = result.contentDiv;
                                     messageId = result.messageId;
+                                    
+                                    console.log('✅ [DEBUG] Assistant message created:', { messageId, contentDiv: messageContent });
                                     
                                     // Store reference to the message group for references
                                     const messageGroups = document.querySelectorAll('.message-group[data-role="assistant"]');
@@ -2457,13 +2550,31 @@
                                 
                                 accumulatedText += data.answer_chunk;
                                 messageContent.textContent = accumulatedText;
+                                console.log('📄 [DEBUG] Updated message content, total length:', accumulatedText.length);
                                 
                                 // Scroll to bottom
                                 const chatContainer = document.getElementById('chat-container');
                                 chatContainer.scrollTop = chatContainer.scrollHeight;
+                            } else {
+                                console.log('⚠️ [DEBUG] No answer_chunk in data:', Object.keys(data));
                             }
                             if (data.references) {
-                                console.log('Received references:', data.references);
+                                console.log('📚 [DEBUG] Received references:', data.references);
+                                
+                                // If we received references but no message was created yet, create one
+                                if (!messageCreated) {
+                                    console.log('🆕 [DEBUG] Creating message for references-only response');
+                                    removeTypingIndicator();
+                                    
+                                    const result = addMessage('assistant', '관련 자료를 찾았습니다.');
+                                    messageContent = result.contentDiv;
+                                    messageId = result.messageId;
+                                    
+                                    const messageGroups = document.querySelectorAll('.message-group[data-role="assistant"]');
+                                    currentMessageGroup = messageGroups[messageGroups.length - 1];
+                                    
+                                    messageCreated = true;
+                                }
                                 
                                 // Ensure message group exists before adding references
                                 if (!currentMessageGroup) {
@@ -2473,24 +2584,57 @@
                                 }
                                 
                                 if (currentMessageGroup && !currentMessageGroup.querySelector('.references-container')) {
-                                    console.log('Appending references to message group');
+                                    console.log('✅ [DEBUG] Appending references to message group');
                                     appendReferences(currentMessageGroup, data.references);
+                                    
+                                    // 🔗 참고자료도 chatManager에 저장
+                                    console.log('🔗 [DEBUG] Saving references to chatManager');
+                                    chatManager.updateLastAssistantMessageReferences(data.references);
                                 } else {
-                                    console.warn('Could not append references - message group not found or references already exist');
+                                    console.warn('⚠️ [DEBUG] Could not append references - message group not found or references already exist');
                                 }
                             }
                         } catch (e) {
                             // JSON 파싱 실패 시 조용히 무시 (빈 줄이나 불완전한 데이터일 수 있음)
                             if (line.length > 0) {
-                                console.debug('Stream line parse skip:', line);
+                                console.warn('❌ [DEBUG] JSON parsing failed for line:', line, 'Error:', e.message);
+                                console.log('🔍 [DEBUG] Raw line data:', { 
+                                    line, 
+                                    jsonStr, 
+                                    startsWithData: line.startsWith('data: '),
+                                    length: line.length 
+                                });
                             }
                         }
                     }
                 }
                 
                 // Show success indicator
+                console.log('🎯 [DEBUG] Final response state:', { 
+                    accumulatedText: accumulatedText.substring(0, 100) + (accumulatedText.length > 100 ? '...' : ''),
+                    totalLength: accumulatedText.length,
+                    messageCreated,
+                    messageContentExists: !!messageContent
+                });
+                
                 if (accumulatedText) {
-                    // Response completed successfully
+                    console.log('✅ [DEBUG] Response completed successfully');
+                    
+                    // 🔑 핵심 수정: 스트리밍 완료 후 chatManager에 최종 내용 업데이트
+                    if (messageCreated && messageId) {
+                        console.log('🔄 [DEBUG] Updating chatManager with final accumulated text');
+                        chatManager.updateLastAssistantMessage(accumulatedText);
+                        console.log('✅ [DEBUG] chatManager updated with final content');
+                    }
+                } else {
+                    console.warn('⚠️ [DEBUG] No accumulated text - possible streaming issue');
+                    
+                    // If no message was created during streaming, create an error message
+                    if (!messageCreated) {
+                        console.log('🚨 [DEBUG] Creating fallback message for failed response');
+                        removeTypingIndicator();
+                        addMessage('assistant', '죄송합니다. 응답을 생성하는 중 문제가 발생했습니다. 다시 시도해 주세요.');
+                    }
                 }
                 
             } catch (error) {
@@ -2569,15 +2713,19 @@
                     addMessage('assistant', `죄송합니다. 오류가 발생했습니다:\n${error.message}`);
                 }
             } finally {
+                console.log('🔄 [DEBUG] Cleaning up streaming state');
+                
                 // Clear timeout if still active
                 if (timeoutId) {
                     clearTimeout(timeoutId);
+                    console.log('⏰ [DEBUG] Timeout cleared');
                 }
                 
                 resumeStatusPoll(); // Resume status polling after streaming
                 isStreaming = false;
                 document.getElementById('send-btn').disabled = false;
                 abortController = null;
+                console.log('✅ [DEBUG] Send button re-enabled, streaming state reset');
             }
         }
 
@@ -2673,9 +2821,8 @@
             })
             .catch(error => {
                 console.error('Error opening file:', error);
-                    toastManager.error('파일 열기 중 오류가 발생했습니다', '오류');
-                });
-            }
+                toastManager.error('파일 열기 중 오류가 발생했습니다', '오류');
+            });
         }
         
         // Append References to Message
