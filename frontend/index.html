@@ -1857,6 +1857,18 @@
             // Load sidebar state
             loadSidebarState();
             
+            // 파일 열기 버튼 이벤트 위임 (UNC 경로 문제 해결)
+            document.addEventListener('click', function(e) {
+                if (e.target.classList.contains('file-open-btn')) {
+                    e.preventDefault();
+                    const filePath = e.target.dataset.path;
+                    if (filePath) {
+                        console.log('Opening file with preserved path:', filePath);
+                        openFileReference(filePath);
+                    }
+                }
+            });
+            
             // Keyboard shortcuts
             document.addEventListener('keydown', function(e) {
                 // Ctrl+B or Cmd+B to toggle sidebar
@@ -2616,34 +2628,51 @@
         function openFileReference(filePath) {
             if (!filePath) return;
             
-            // Try to open the file path
-            // Note: This might need a backend endpoint to handle file opening
-            // For now, we'll try to open it as a file:// URL or request backend to handle it
+            console.log('Opening file reference:', filePath);
             
-            // Option 1: If it's a network path, try to open directly
-            if (filePath.startsWith('\\\\') || filePath.startsWith('//')) {
-                // Convert to file URL format
-                const fileUrl = 'file:' + filePath.replace(/\\/g, '/');
-                window.open(fileUrl, '_blank');
-            } 
-            // Option 2: Request backend to open the file
-            else {
-                fetch(`${BACKEND_BASE}/open_file`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ file_path: filePath })
-                })
-                .then(response => {
-                    if (!response.ok && response.status !== 204) {
-                        toastManager.error('파일을 열 수 없습니다', '오류');
-                    } else {
-                        toastManager.success('파일 열기 요청을 전송했습니다');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error opening file:', error);
+            // 개선된 file URI 변환 함수
+            function toFileUri(path) {
+                if (!path) return "";
+                
+                // 이미 file:// 형식이면 그대로 반환
+                if (/^file:\/\//i.test(path)) return path;
+                
+                // 백슬래시를 슬래시로 변환
+                let normalized = path.replace(/\\/g, "/");
+                
+                // UNC 경로 처리: //server/share/...
+                if (normalized.startsWith("//")) {
+                    // UNC 경로는 file://server/share 형태로 (슬래시 2개)
+                    return "file:" + normalized;
+                }
+                
+                // 일반 로컬 경로
+                return "file:///" + normalized;
+            }
+            
+            // 모든 경로를 백엔드로 전송 (백엔드에서 적절히 처리)
+            const payload = {
+                file_path: filePath.startsWith('file://') ? filePath : toFileUri(filePath)
+            };
+            
+            console.log('Sending file open request:', payload);
+            
+            fetch(`${BACKEND_BASE}/open_file`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload)
+            })
+            .then(response => {
+                if (!response.ok && response.status !== 204) {
+                    toastManager.error('파일을 열 수 없습니다', '오류');
+                } else {
+                    toastManager.success('파일 열기 요청을 전송했습니다');
+                }
+            })
+            .catch(error => {
+                console.error('Error opening file:', error);
                     toastManager.error('파일 열기 중 오류가 발생했습니다', '오류');
                 });
             }
@@ -2728,7 +2757,7 @@
                 refItem.style.transition = 'all 0.2s ease';
                 
                 if (ref.type === 'document') {
-                    // Document reference
+                    // Document reference - data 속성을 사용하여 경로 보존
                     refItem.innerHTML = `
                         <div style="flex: 1;">
                             <div style="font-size: 13px; font-weight: 500; color: var(--text-primary);">
@@ -2738,7 +2767,8 @@
                                 ${escapeHtml(ref.date)} • ${escapeHtml(ref.path || '파일 경로')}
                             </div>
                         </div>
-                        <button onclick="openFileReference('${escapeHtml(ref.path)}')" 
+                        <button class="file-open-btn"
+                                data-path="${(ref.path || '').replace(/"/g, '&quot;')}"
                                 style="padding: 6px 12px; background: var(--brand-primary); color: white; 
                                        border: none; border-radius: 4px; font-size: 12px; cursor: pointer;
                                        transition: all 0.2s ease;"
@@ -2907,13 +2937,6 @@
             chatManager.saveChats();
             chatManager.stopAutoSave();
         });
-        function toFileUri(winPath) {
-            // UNC: \\server\share\... -> //server/share/...
-            const norm = winPath.replaceAll("\\", "/").replace(/^\/\//, "//");
-            return "file:///" + encodeURI(norm);
-          }
-          const payload = { file_path: ref.path.startsWith("file:///") ? ref.path : toFileUri(ref.path) };
-          fetch("/open_file", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
     </script>
 
     <!-- Settings Panel -->
