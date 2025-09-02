@@ -75,7 +75,6 @@ class AppConfig:
     # 기존 필드 유지
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
-    QDRANT_COLLECTIONS: list[str] = ["my_documents"]
     QDRANT_SCORE_THRESHOLD: float = 0.30  # Lowered threshold to find more results
     QDRANT_SEARCH_LIMIT: int = 3  # Reduce to 3 for faster processing
     QDRANT_TIMEOUT: float = 30.0
@@ -83,6 +82,15 @@ class AppConfig:
         "hnsw_ef": 128,  # Increase for better accuracy (default: 128)
         "exact": False   # Use approximate search for speed
     }
+    
+    # 소스별 컬렉션 분리
+    @property
+    def MAIL_QDRANT_COLLECTIONS(self) -> list[str]:
+        return ["my_documents"]  # 개인 메일용 컬렉션
+    
+    @property
+    def DOC_QDRANT_COLLECTIONS(self) -> list[str]:
+        return ["my_documents"]  # 부서 문서용 컬렉션
     
     DEFAULT_LLM_MODEL: str = "gemma3:4b"
     LLM_TIMEOUT: int = 60
@@ -143,7 +151,16 @@ async def lifespan(app: FastAPI):
             "mail": QdrantClient(host=config.MAIL_QDRANT_HOST, port=config.MAIL_QDRANT_PORT, timeout=config.QDRANT_TIMEOUT),
             "doc": QdrantClient(host=config.DOC_QDRANT_HOST, port=config.DOC_QDRANT_PORT, timeout=config.QDRANT_TIMEOUT),
         }
+        
+        # 엔드포인트 문자열 저장 및 상세 로깅
+        app_state["qdrant_endpoints"] = {
+            "mail": f"http://{config.MAIL_QDRANT_HOST}:{config.MAIL_QDRANT_PORT}",
+            "doc": f"http://{config.DOC_QDRANT_HOST}:{config.DOC_QDRANT_PORT}",
+        }
+        
         logger.info("✅ Qdrant 클라이언트들 연결 성공.")
+        logger.info(f"   MAIL → {app_state['qdrant_endpoints']['mail']} | collections={config.MAIL_QDRANT_COLLECTIONS}")
+        logger.info(f"   DOC  → {app_state['qdrant_endpoints']['doc']}  | collections={config.DOC_QDRANT_COLLECTIONS}")
         
         # Qdrant 컬렉션 상태 확인 (디버그 모드)
         if DEBUG_MODE:
@@ -252,7 +269,7 @@ async def stream_llm_response(prompt: str, model: str, request_id: str):
         logger.error(f"[{request_id}] LLM 스트리밍 실패: {e}")
         yield "답변 생성 중 오류가 발생했습니다."
 
-def search_qdrant(question: str, request_id: str, client: QdrantClient, config: AppConfig, source: str = "mail") -> tuple[str, list[dict]]:
+def search_qdrant(question: str, request_id: str, client: QdrantClient, config: AppConfig, source: str, collections: list[str]) -> tuple[str, list[dict]]:
     """Qdrant에서 관련 문서를 검색합니다."""
     embeddings = app_state.get("embeddings")
     if not client or not embeddings:
@@ -287,9 +304,9 @@ def search_qdrant(question: str, request_id: str, client: QdrantClient, config: 
     logger.debug(f"[{request_id}] Query vector created - dimension: {len(query_vector)}")
 
     all_hits = []
-    for collection_name in config.QDRANT_COLLECTIONS:
+    for collection_name in collections:
         try:
-            logger.info(f"[{request_id}] 🔎 Searching collection: '{collection_name}'")
+            logger.info(f"[{request_id}] 🔎 Searching collection: '{collection_name}' on source: {source}")
             logger.debug(f"[{request_id}] Search params - limit: {config.QDRANT_SEARCH_LIMIT}, threshold: {config.QDRANT_SCORE_THRESHOLD}")
             
             hits = client.search(
@@ -740,7 +757,19 @@ async def ask(req: Request):
         logger.info(f"[{request_id}] 🤖 Model: {model}")
         
         client = app_state["qdrant_clients"][source]
-        context_text, references = search_qdrant(question, request_id, client, config, source)
+        endpoint = app_state["qdrant_endpoints"][source]
+        collections = config.MAIL_QDRANT_COLLECTIONS if source == "mail" else config.DOC_QDRANT_COLLECTIONS
+        
+        logger.info(f"[{request_id}] 🌐 Qdrant endpoint: {endpoint}")
+        logger.info(f"[{request_id}] 🗂️ Collections: {collections}")
+        
+        # 방어적 검증: 소스-엔드포인트 충돌 시 즉시 경고
+        if source == "doc" and endpoint == app_state["qdrant_endpoints"]["mail"]:
+            logger.error(f"[{request_id}] ❌ DOC 요청인데 MAIL 엔드포인트가 선택됨! 환경변수/초기화 확인 필요")
+        if source == "mail" and endpoint == app_state["qdrant_endpoints"]["doc"]:
+            logger.error(f"[{request_id}] ❌ MAIL 요청인데 DOC 엔드포인트가 선택됨! 환경변수/초기화 확인 필요")
+        
+        context_text, references = search_qdrant(question, request_id, client, config, source, collections)
         
         if not context_text:
             logger.warning(f"[{request_id}] ⚠️ No context found for question: {question}")
