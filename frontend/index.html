@@ -1235,7 +1235,7 @@
                         <button class="source-btn active" data-source="mail" data-scope="personal" onclick="selectSource('mail', 'personal')">
                             📧 개인 데이터
                         </button>
-                        <button class="source-btn" data-source="mail" data-scope="dept" onclick="selectSource('mail', 'dept')">
+                        <button class="source-btn" data-source="doc" data-scope="dept" onclick="selectSource('doc', 'dept')">
                             🏢 부서 데이터
                         </button>
                     </div>
@@ -1913,7 +1913,12 @@
 
         // Source Selection with Scope
         function selectSource(source, scope) {
-            currentSource = source;
+            // source를 mail/doc으로 설정
+            if (scope === 'personal') {
+                currentSource = 'mail';  // 개인 DB = mail
+            } else if (scope === 'dept') {
+                currentSource = 'doc';   // 부서 DB = doc
+            }
             currentScope = scope;
             
             // Update button states
@@ -1964,8 +1969,8 @@
                         document.body.dataset.connectionError = 'false';
                     }
                     
-                    // Also check Qdrant status specifically
-                    checkQdrantStatus();
+                    // Qdrant status is now included in /status response
+                    // checkQdrantStatus(); // Removed - using unified /status
                 } else {
                     handleStatusError('서버 응답 오류', response.status);
                 }
@@ -1975,38 +1980,7 @@
             }
         }
         
-        // Qdrant 상태 체크 함수
-        async function checkQdrantStatus() {
-            try {
-                const response = await fetch(`${BACKEND_BASE}/api/v2/system/qdrant/status`);
-                if (response.ok) {
-                    const data = await response.json();
-                    
-                    // Update Qdrant-specific indicators
-                    const qdrantIndicator = document.querySelector('.status-indicator:nth-child(2)');
-                    if (qdrantIndicator) {
-                        if (data.connected) {
-                            qdrantIndicator.className = 'status-indicator success';
-                            qdrantIndicator.title = `Qdrant 연결됨 (Collections: ${data.collections})`;
-                            
-                            // Remove warning if it exists
-                            const warning = document.querySelector('.qdrant-warning');
-                            if (warning) warning.remove();
-                        } else {
-                            qdrantIndicator.className = 'status-indicator error';
-                            qdrantIndicator.title = 'Qdrant 연결 실패';
-                            
-                            // Show warning if not already shown
-                            if (!document.querySelector('.qdrant-warning')) {
-                                showQdrantWarning(data.message);
-                            }
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Qdrant status check failed:', error);
-            }
-        }
+        // checkQdrantStatus 함수 제거됨 - 통합 /status 사용
         
         // Qdrant 미실행 경고 표시
         function showQdrantWarning(message) {
@@ -2103,14 +2077,16 @@
             const deptBadge = document.getElementById('qdrant-dept');
             
             if (personalBadge && deptBadge) {
-                // Update personal Qdrant status
-                updateBadgeStatus(personalBadge, status.qdrant?.personal?.status || 'unknown', {
+                // Update personal Qdrant status (boolean → badge state)
+                const personalStatus = status.qdrant_mail ? 'connected' : 'disconnected';
+                updateBadgeStatus(personalBadge, personalStatus, {
                     host: '127.0.0.1:6333',
                     name: '개인 Qdrant'
                 });
                 
-                // Update department Qdrant status  
-                updateBadgeStatus(deptBadge, status.qdrant?.dept?.status || 'unknown', {
+                // Update department Qdrant status (boolean → badge state)
+                const deptStatus = status.qdrant_doc ? 'connected' : 'disconnected';
+                updateBadgeStatus(deptBadge, deptStatus, {
                     host: '10.150.104.37:6333', 
                     name: '부서 Qdrant'
                 });
@@ -2364,16 +2340,15 @@
                     }
                 }, TIMEOUT_DURATION);
                 
-                const response = await fetch(`${BACKEND_BASE}/ask?db_scope=${currentScope}`, {
+                const response = await fetch(`${BACKEND_BASE}/ask`, {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'X-Qdrant-Scope': currentScope  // Include scope in header for dual routing
+                        'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
                         question: question,
                         model: 'gemma3:4b',
-                        source: currentSource
+                        source: currentSource  // 'mail' 또는 'doc'
                     }),
                     signal: abortController.signal
                 });
@@ -2783,7 +2758,9 @@
                                 ${escapeHtml(ref.sender || 'N/A')} • ${escapeHtml(ref.date)}
                             </div>
                         </div>
-                        <button onclick="openReference('${escapeHtml(ref.link)}')" 
+                        <button data-link="${ref.link ? ref.link.replace(/\\/g, '/') : ''}" 
+                                data-display-url="${ref.display_url || ''}"
+                                onclick="openReference(this.getAttribute('data-link'), this.getAttribute('data-display-url'))" 
                                 style="padding: 6px 12px; background: var(--brand-primary); color: white; 
                                        border: none; border-radius: 4px; font-size: 12px; cursor: pointer;
                                        transition: all 0.2s ease;"
@@ -2930,6 +2907,13 @@
             chatManager.saveChats();
             chatManager.stopAutoSave();
         });
+        function toFileUri(winPath) {
+            // UNC: \\server\share\... -> //server/share/...
+            const norm = winPath.replaceAll("\\", "/").replace(/^\/\//, "//");
+            return "file:///" + encodeURI(norm);
+          }
+          const payload = { file_path: ref.path.startsWith("file:///") ? ref.path : toFileUri(ref.path) };
+          fetch("/open_file", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) });
     </script>
 
     <!-- Settings Panel -->

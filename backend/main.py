@@ -5,7 +5,6 @@ import json
 import uuid
 import datetime
 import urllib.parse
-import time
 from collections import deque
 from contextlib import asynccontextmanager
 from textwrap import dedent
@@ -14,142 +13,40 @@ import hashlib
 
 import torch
 import requests
-from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import Response, StreamingResponse, JSONResponse
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from qdrant_client import QdrantClient, models
 from langchain_huggingface import HuggingFaceEmbeddings
-
-# Import GPU acceleration components  
-from backend.pipeline.async_pipeline import AsyncPipeline
-from backend.common.schemas import AskRequest, IngestRequest
-from backend.common.security import cors_kwargs
-from backend.common.logging import (
-    request_id_ctx, source_ctx, namespace_ctx,
-    setup_logging, get_query_hash, set_request_context, clear_request_context,
-    # P1-4: Metrics imports
-    REQ_COUNT, REQ_LATENCY, RAG_REQ, EMBED_LAT, SEARCH_LAT, QDRANT_ERR,
-    CACHE_HITS, CACHE_MISSES, ACTIVE_CONNECTIONS, LLM_TOKENS, prometheus_app
-)
-from backend.common.config_loader import get_config_loader, QdrantEndpoint
+from dotenv import load_dotenv
+load_dotenv()
 
 # --------------------------------------------------------------------------
-# 1. Enhanced Logging Setup with PII Protection (P1-3)
+# 1. 로깅 설정
 # --------------------------------------------------------------------------
-# Initialize structured logging with PII masking
-audit_logger = setup_logging(
-    level=os.getenv("LOG_LEVEL", "INFO"),
-    format_type=os.getenv("LOG_FORMAT", "json"),
-    redact_pii=os.getenv("LOG_REDACT_PII", "true").lower() == "true",
-    audit_enabled=os.getenv("SECURITY_AUDIT_ENABLED", "true").lower() == "true"
-)
+LOGS_DIR = "logs"
+os.makedirs(LOGS_DIR, exist_ok=True)
+log_filename = os.path.join(LOGS_DIR, f"rag_log_{datetime.date.today()}.log")
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+if logger.hasHandlers():
+    logger.handlers.clear()
+
+c_handler = logging.StreamHandler()
+c_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+c_handler.setFormatter(c_format)
+logger.addHandler(c_handler)
+
+f_handler = logging.FileHandler(log_filename, encoding='utf-8')
+f_format = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s')
+f_handler.setFormatter(f_format)
+logger.addHandler(f_handler)
 
 
 # --------------------------------------------------------------------------
 # 2. 전역 변수 및 설정
 # --------------------------------------------------------------------------
-
-# --------------------------------------------------------------------------
-# 2.1 Dual Qdrant Router System
-# --------------------------------------------------------------------------
-class QdrantRouter:
-    """Dual Qdrant routing system for personal PC vs department server"""
-    
-    def __init__(self, config: 'AppConfig'):
-        self.config = config
-        self.clients = {}
-        self._init_dual_clients()
-    
-    def _init_dual_clients(self):
-        """Initialize both personal and department Qdrant clients"""
-        try:
-            # Personal PC client
-            personal_endpoint = self.config.get_qdrant_endpoint('personal')
-            self.clients['personal'] = QdrantClient(
-                host=personal_endpoint.host,
-                port=personal_endpoint.port,
-                timeout=personal_endpoint.timeout
-            )
-            logger.info(f"✅ Personal Qdrant client initialized: {personal_endpoint.host}:{personal_endpoint.port}")
-            
-            # Department server client
-            dept_endpoint = self.config.get_qdrant_endpoint('dept')
-            self.clients['dept'] = QdrantClient(
-                host=dept_endpoint.host,
-                port=dept_endpoint.port,
-                timeout=dept_endpoint.timeout
-            )
-            logger.info(f"✅ Department Qdrant client initialized: {dept_endpoint.host}:{dept_endpoint.port}")
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize dual Qdrant clients: {e}")
-            raise
-    
-    def get_client(self, scope: str = None, request: Request = None) -> QdrantClient:
-        """Get appropriate Qdrant client based on scope or request headers"""
-        # Priority 1: Explicit scope parameter
-        if scope in self.clients:
-            return self.clients[scope]
-        
-        # Priority 2: X-Qdrant-Scope header
-        if request and hasattr(request, 'headers'):
-            header_scope = request.headers.get('X-Qdrant-Scope', '').lower()
-            if header_scope in self.clients:
-                logger.info(f"🎯 Using {header_scope} Qdrant from X-Qdrant-Scope header")
-                return self.clients[header_scope]
-        
-        # Priority 3: Default fallback to personal
-        default_scope = os.getenv('DEFAULT_QDRANT_SCOPE', 'personal')
-        if default_scope in self.clients:
-            logger.debug(f"📍 Using default {default_scope} Qdrant client")
-            return self.clients[default_scope]
-        
-        # Ultimate fallback
-        return list(self.clients.values())[0] if self.clients else None
-    
-    def health_check(self) -> dict:
-        """Check health of both Qdrant instances"""
-        status = {}
-        for scope, client in self.clients.items():
-            try:
-                collections = client.get_collections()
-                status[scope] = {
-                    'status': 'healthy',
-                    'collections': len(collections.collections),
-                    'endpoint': f"{scope} Qdrant"
-                }
-            except Exception as e:
-                status[scope] = {
-                    'status': 'unhealthy',
-                    'error': str(e),
-                    'endpoint': f"{scope} Qdrant"
-                }
-        return status
-    
-    async def get_aggregated_status(self) -> dict:
-        """Get aggregated status for dual routing system"""
-        try:
-            status = self.health_check()
-            
-            # Calculate overall health
-            healthy_count = sum(1 for s in status.values() if s.get('status') == 'healthy')
-            total_count = len(status)
-            
-            return {
-                'dual_routing_enabled': True,
-                'available_scopes': list(self.clients.keys()),
-                'healthy_instances': f"{healthy_count}/{total_count}",
-                'detailed_status': status,
-                'overall_status': 'healthy' if healthy_count == total_count else 'degraded' if healthy_count > 0 else 'unhealthy'
-            }
-        except Exception as e:
-            return {
-                'dual_routing_enabled': False,
-                'error': str(e),
-                'overall_status': 'error'
-            }
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 EMBEDDING_MODEL_DEFAULT_PATH = PROJECT_ROOT / "src" / "bin" / "bge-m3-local"
 
@@ -172,62 +69,13 @@ except ImportError:
 
 class AppConfig:
     """애플리케이션 설정을 관리합니다."""
-    def __init__(self):
-        # Initialize config loader
-        self._config_loader = get_config_loader()
-        self._qdrant_endpoints = None
-        self._load_qdrant_endpoints()
-    
-    def _load_qdrant_endpoints(self):
-        """Load Qdrant endpoints from JSON configuration"""
-        try:
-            self._qdrant_endpoints = self._config_loader.get_qdrant_endpoints()
-            logger.info(f"✅ Loaded {len(self._qdrant_endpoints)} Qdrant endpoints from JSON config")
-        except Exception as e:
-            logger.error(f"❌ Failed to load Qdrant endpoints from JSON config: {e}")
-            self._qdrant_endpoints = {}
-    
-    def get_qdrant_endpoint(self, scope: str) -> QdrantEndpoint:
-        """Get Qdrant endpoint configuration for specific scope"""
-        if self._qdrant_endpoints and scope in self._qdrant_endpoints:
-            return self._qdrant_endpoints[scope]
-        
-        # Fallback to environment variables
-        logger.warning(f"⚠️ Using environment variable fallback for {scope} Qdrant endpoint")
-        if scope == 'personal':
-            return QdrantEndpoint(
-                host=os.getenv('QDRANT_PERSONAL_HOST', '127.0.0.1'),
-                port=int(os.getenv('QDRANT_PERSONAL_PORT', '6333')),
-                timeout=float(os.getenv('QDRANT_PERSONAL_TIMEOUT', '15.0')),
-                description='Personal Qdrant (env fallback)'
-            )
-        elif scope == 'dept':
-            return QdrantEndpoint(
-                host=os.getenv('QDRANT_DEPT_HOST', '10.150.104.37'),
-                port=int(os.getenv('QDRANT_DEPT_PORT', '6333')),
-                timeout=float(os.getenv('QDRANT_DEPT_TIMEOUT', '20.0')),
-                description='Department Qdrant (env fallback)'
-            )
-        else:
-            # Default fallback
-            return QdrantEndpoint(
-                host='127.0.0.1',
-                port=6333,
-                timeout=30.0,
-                description=f'Default Qdrant for {scope}'
-            )
-    
-    # Basic application settings
     EMBEDDING_MODEL_PATH: str = str(EMBEDDING_MODEL_DEFAULT_PATH)
     OLLAMA_API_URL: str = os.getenv("RAG_OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
     
-    # 컬렉션 네임스페이스 분리 - 보안·분리 설계 핵심
-    # Note: Collection names are now dynamically generated via ResourceManager.get_default_collection_name()
-    # This provides centralized collection naming and better maintainability
-    
-    # 레거시 호환성 (JSON 설정으로 대체 예정)
+    # 기존 필드 유지
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333
+    QDRANT_COLLECTIONS: list[str] = ["my_documents"]
     QDRANT_SCORE_THRESHOLD: float = 0.30  # Lowered threshold to find more results
     QDRANT_SEARCH_LIMIT: int = 3  # Reduce to 3 for faster processing
     QDRANT_TIMEOUT: float = 30.0
@@ -236,49 +84,35 @@ class AppConfig:
         "exact": False   # Use approximate search for speed
     }
     
-    # 분리된 Qdrant 인스턴스 설정 - JSON 설정으로 대체됨
-    @property
-    def MAIL_QDRANT_HOST(self) -> str:
-        personal_ep = self.get_qdrant_endpoint('personal')
-        return personal_ep.host
-    
-    @property
-    def MAIL_QDRANT_PORT(self) -> int:
-        personal_ep = self.get_qdrant_endpoint('personal')
-        return personal_ep.port
-        
-    @property
-    def MAIL_QDRANT_TIMEOUT(self) -> float:
-        personal_ep = self.get_qdrant_endpoint('personal')
-        return personal_ep.timeout
-    
-    @property
-    def DOC_QDRANT_HOST(self) -> str:
-        dept_ep = self.get_qdrant_endpoint('dept')
-        return dept_ep.host
-        
-    @property 
-    def DOC_QDRANT_PORT(self) -> int:
-        dept_ep = self.get_qdrant_endpoint('dept')
-        return dept_ep.port
-        
-    @property
-    def DOC_QDRANT_TIMEOUT(self) -> float:
-        dept_ep = self.get_qdrant_endpoint('dept')
-        return dept_ep.timeout
-    
     DEFAULT_LLM_MODEL: str = "gemma3:4b"
     LLM_TIMEOUT: int = 60
     GREETINGS: list[str] = ["안녕", "안녕하세요", "ㅎㅇ", "하이", "반가워", "반갑습니다"]
+    
+    # 동적 속성으로 변경
+    @property
+    def MAIL_QDRANT_HOST(self) -> str:
+        return os.getenv("RAG_MAIL_QDRANT_HOST", "127.0.0.1")
+    
+    @property
+    def MAIL_QDRANT_PORT(self) -> int:
+        return int(os.getenv("RAG_MAIL_QDRANT_PORT", "6333"))
+    
+    @property
+    def DOC_QDRANT_HOST(self) -> str:
+        return os.getenv("RAG_DOC_QDRANT_HOST", "127.0.0.1")
+    
+    @property
+    def DOC_QDRANT_PORT(self) -> int:
+        return int(os.getenv("RAG_DOC_QDRANT_PORT", "6333"))
 
 config = AppConfig()
 app_state = {}
 dialog_cache: deque[tuple[str, str]] = deque(maxlen=3)
 
 # Embedding cache with LRU (Least Recently Used) eviction
-# P1-6: Cache size now configurable via environment variable
+# Cache up to 100 queries to balance memory and performance
 embedding_cache = {}
-MAX_CACHE_SIZE = int(os.getenv("EMBED_CACHE_MAX", "512"))
+MAX_CACHE_SIZE = 100
 
 
 # --------------------------------------------------------------------------
@@ -288,515 +122,62 @@ MAX_CACHE_SIZE = int(os.getenv("EMBED_CACHE_MAX", "512"))
 async def lifespan(app: FastAPI):
     """애플리케이션 시작 시 모델 및 클라이언트 로드, 종료 시 정리"""
     logger.info("🚀 애플리케이션 시작...")
-    logger.info(f"📦 Backend Version: 1.0.4 - Enhanced Security & Stability")
+    logger.info(f"📦 Backend Version: 1.0.3 - Updated")
     logger.info(f"🕐 Start Time: {datetime.datetime.now().isoformat()}")
-    
-    # Step 1: Configuration Validation (Critical for stability)
-    try:
-        from config_validator import validate_startup_config
-        validation_result = validate_startup_config()
-        
-        if not validation_result.is_valid:
-            logger.warning("⚠️ Configuration validation failed, but continuing with defaults")
-            for error in validation_result.errors:
-                logger.error(f"  - {error}")
-        
-        if validation_result.applied_defaults:
-            logger.info(f"🔧 Applied {len(validation_result.applied_defaults)} default configurations")
-            
-        logger.info("✅ Configuration validation completed")
-    except Exception as e:
-        logger.warning(f"⚠️ Configuration validation failed: {e}")
-        logger.info("Continuing with existing configuration...")
-    
-    # P1-6: Enhanced device and batch configuration with GPU support
     device_type = "cuda" if torch.cuda.is_available() else "cpu"
-    final_device = os.getenv("EMBED_DEVICE", device_type)
-    batch_size = int(os.getenv("EMBED_BATCH", "32"))
-    
-    # Determine optimal dtype based on device
-    dtype_str = os.getenv("EMBED_DTYPE", "float16" if final_device == "cuda" else "float32")
-    if dtype_str == "float16" and final_device == "cuda":
-        torch_dtype = torch.float16
-        logger.info(f"🚀 GPU FP16 acceleration enabled")
-    else:
-        torch_dtype = torch.float32
-    
-    logger.info(f"✅ 실행 디바이스: {final_device.upper()} (Batch: {batch_size}, Dtype: {dtype_str})")
+    logger.info(f"✅ 실행 디바이스: {device_type.upper()}")
 
     try:
-        # HuggingFaceEmbeddings doesn't support torch_dtype directly
-        model_kwargs = {
-            "device": final_device
-        }
-        
-        # GPU-specific optimizations
-        if final_device == "cuda":
-            batch_size = int(os.getenv("EMBED_BATCH", "64"))  # Larger batch for GPU
-            
         app_state["embeddings"] = HuggingFaceEmbeddings(
             model_name=config.EMBEDDING_MODEL_PATH,
-            model_kwargs=model_kwargs,
-            encode_kwargs={
-                "normalize_embeddings": True,
-                "batch_size": batch_size,
-                "show_progress_bar": False
-            }
+            model_kwargs={"device": device_type},
+            encode_kwargs={"normalize_embeddings": True}
         )
-        logger.info(f"✅ 임베딩 모델 로드 성공 (device={final_device}, batch={batch_size}, dtype={dtype_str})")
+        logger.info(f"✅ 임베딩 모델 로드 성공 ({device_type.upper()}).")
     except Exception as e:
         logger.error(f"❌ 임베딩 모델 로드 실패: {e}", exc_info=True)
 
     try:
-        # 보안 강화된 Qdrant 클라이언트 초기화 (ResourceManager 초기화 후 업데이트됨)
-        try:
-            from qdrant_security_config import DEFAULT_SECURITY_CONFIG, create_secure_qdrant_clients
-            
-            app_state["qdrant_security_config"] = DEFAULT_SECURITY_CONFIG
-            app_state["qdrant_clients"] = create_secure_qdrant_clients(DEFAULT_SECURITY_CONFIG)
-            
-            # 연결 상태 확인
-            successful_connections = len(app_state["qdrant_clients"])
-            logger.info(f"✅ {successful_connections}/2 보안 Qdrant 클라이언트 연결 성공 (임시 설정)")
-            logger.info(f"🔐 임시 컬렉션 네임스페이스 분리: {DEFAULT_SECURITY_CONFIG.collection_namespaces}")
-            logger.info("ℹ️ ResourceManager 초기화 후 동적 설정으로 업데이트됩니다")
-            
-        except ImportError:
-            logger.error(f"❌ Qdrant 보안 설정 모듈을 찾을 수 없습니다. 기본 클라이언트로 대체합니다.")
-            # 기본 클라이언트 설정 (레거시 호환성)
-            app_state["qdrant_clients"] = {
-                "mail": QdrantClient(host=config.MAIL_QDRANT_HOST, port=config.MAIL_QDRANT_PORT, timeout=15.0),
-                "doc": QdrantClient(host=config.DOC_QDRANT_HOST, port=config.DOC_QDRANT_PORT, timeout=20.0)
-            }
-        except Exception as e:
-            logger.error(f"❌ 보안 Qdrant 클라이언트 초기화 실패: {e}")
-            # 레거시 대체
-            app_state["qdrant_clients"] = {
-                "mail": QdrantClient(host=config.MAIL_QDRANT_HOST, port=config.MAIL_QDRANT_PORT),
-                "doc": QdrantClient(host=config.DOC_QDRANT_HOST, port=config.DOC_QDRANT_PORT)
-            }
+        # Qdrant 클라이언트 2개 초기화
+        app_state["qdrant_clients"] = {
+            "mail": QdrantClient(host=config.MAIL_QDRANT_HOST, port=config.MAIL_QDRANT_PORT, timeout=config.QDRANT_TIMEOUT),
+            "doc": QdrantClient(host=config.DOC_QDRANT_HOST, port=config.DOC_QDRANT_PORT, timeout=config.QDRANT_TIMEOUT),
+        }
+        logger.info("✅ Qdrant 클라이언트들 연결 성공.")
         
-        # Initialize Dual Qdrant Router (for personal/department routing)
-        try:
-            app_state["qdrant_router"] = QdrantRouter(config)
-            logger.info("✅ Dual Qdrant Router initialized successfully")
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize Dual Qdrant Router: {e}")
-            app_state["qdrant_router"] = None
-        
-        # 보안·분리 컬렉션 상태 확인 (ResourceManager 통합)
+        # Qdrant 컬렉션 상태 확인 (디버그 모드)
         if DEBUG_MODE:
-            for source_type, client in app_state["qdrant_clients"].items():
+            for name, client in app_state["qdrant_clients"].items():
                 try:
                     collections = client.get_collections()
-                    
-                    # ResourceManager를 통한 동적 컬렉션명 획득
-                    resource_manager = app_state.get("resource_manager")
-                    expected_collection = None
-                    if resource_manager:
-                        try:
-                            expected_collection = resource_manager.get_default_collection_name(source_type, "my_documents")
-                        except Exception as rm_error:
-                            logger.warning(f"Failed to get collection name from ResourceManager: {rm_error}")
-                            # Fallback to legacy naming
-                            legacy_namespaces = {"mail": "mail_my_documents", "doc": "doc_my_documents"}
-                            expected_collection = legacy_namespaces.get(source_type)
-                    else:
-                        # Legacy fallback
-                        legacy_namespaces = {"mail": "mail_my_documents", "doc": "doc_my_documents"}
-                        expected_collection = legacy_namespaces.get(source_type)
-                    
-                    logger.debug(f"📊 {source_type.upper()} Qdrant 컬렉션 상태 (기대: {expected_collection}):")
-                    
+                    logger.debug(f"📊 {name.upper()} Qdrant 컬렉션 상태:")
                     for col in collections.collections:
                         try:
                             info = client.get_collection(col.name)
-                            is_expected = "[✅]" if col.name == expected_collection else "[⚠️]"
-                            logger.debug(f"  {is_expected} Collection '{col.name}': vectors={info.vectors_count}, indexed={info.indexed_vectors_count}")
+                            logger.debug(f"  - Collection '{col.name}': vectors={info.vectors_count}, indexed={info.indexed_vectors_count}")
                         except:
-                            logger.debug(f"  [❌] Collection '{col.name}': info unavailable")
-                            
-                    # 기대되는 컬렉션이 없는 경우 경고
-                    collection_names = [col.name for col in collections.collections]
-                    if expected_collection and expected_collection not in collection_names:
-                        logger.warning(f"⚠️ Expected collection '{expected_collection}' not found in {source_type} Qdrant")
-                        
+                            logger.debug(f"  - Collection '{col.name}': info unavailable")
                 except Exception as e:
-                    logger.warning(f"  - {source_type} Qdrant 상태 확인 실패: {e}")
+                    logger.warning(f"  - {name} Qdrant 상태 확인 실패: {e}")
     except Exception as e:
         logger.error(f"❌ Qdrant 클라이언트 연결 실패: {e}", exc_info=True)
 
-    # Phase 2A-1: ResourceManager 초기화
-    try:
-        from backend.resource_manager import get_resource_manager, ResourceManager
-        # Use ResourceManager.from_env() for GPU support
-        resource_manager = ResourceManager.from_env()
-        app_state["resource_manager"] = resource_manager
-        logger.info("🎛️ ResourceManager with GPU acceleration initialized")
-        
-        # Initialize QdrantRouter for dual routing with JSON configuration
-        from backend.common.qdrant_router import QdrantRouter, QdrantConfig
-        
-        # Get endpoints from JSON configuration
-        personal_endpoint = config.get_qdrant_endpoint('personal')
-        dept_endpoint = config.get_qdrant_endpoint('dept')
-        
-        logger.info(f"📍 Personal Qdrant: {personal_endpoint.host}:{personal_endpoint.port}")
-        logger.info(f"📍 Department Qdrant: {dept_endpoint.host}:{dept_endpoint.port}")
-        
-        router = QdrantRouter(
-            env_name=os.getenv("QDRANT_ENV", "dev"),
-            namespace_pattern=os.getenv(
-                "NAMESPACE_PATTERN",
-                "{scope}_{env}_{source}_my_documents"
-            ),
-            personal_cfg=QdrantConfig(
-                host=personal_endpoint.host,
-                port=personal_endpoint.port,
-                timeout=personal_endpoint.timeout,
-                scope="personal"
-            ),
-            dept_cfg=QdrantConfig(
-                host=dept_endpoint.host,
-                port=dept_endpoint.port,
-                timeout=dept_endpoint.timeout,
-                scope="dept"
-            ),
-            secure_factory=None  # Will use standard QdrantClient for now
-        )
-        
-        # Store in app state and pass to resource manager
-        app_state["qdrant_router"] = router
-        resource_manager.qdrant_router = router
-        logger.info("🔀 QdrantRouter initialized for dual routing (personal/dept)")
-        
-        # Phase 2A-1.5: 스타트업 컬렉션 검증 (Fail-Fast 원칙)
-        try:
-            logger.info("🔍 Starting collection validation (Fail-Fast startup check)...")
-            validation_result = await resource_manager.startup_vector_dim_check(
-                sources=["mail", "doc"],
-                base_name="my_documents",
-                auto_create=False  # 프로덕션에서는 자동 생성하지 않음
-            )
-            
-            if validation_result["overall_status"] == "success":
-                logger.info("✅ Collection validation passed successfully")
-                logger.info(f"📊 Validation summary:")
-                for source, info in validation_result["collection_status"].items():
-                    if info["status"] == "ok":
-                        logger.info(f"  • {source}: Collection exists, dimension={info['dimension']}, vectors={info.get('vector_count', 'N/A')}")
-                    else:
-                        logger.warning(f"  • {source}: {info['status']} - {info.get('message', '')}")
-                        
-                # 임베딩 차원 확인
-                if "embedding_dimension" in validation_result:
-                    logger.info(f"🔢 Detected embedding dimension: {validation_result['embedding_dimension']}")
-                    
-            elif validation_result["overall_status"] == "warning":
-                logger.warning("⚠️ Collection validation completed with warnings")
-                logger.warning(f"🚨 Issues found: {len(validation_result.get('issues', []))}")
-                for issue in validation_result.get("issues", []):
-                    logger.warning(f"  • {issue}")
-                logger.info("Application will continue, but some features may be limited")
-                
-            else:  # error status
-                logger.error("❌ Collection validation FAILED - Application startup aborted")
-                logger.error(f"🚨 Critical issues found: {len(validation_result.get('issues', []))}")
-                for issue in validation_result.get("issues", []):
-                    logger.error(f"  • {issue}")
-                
-                # Fail-Fast: 컬렉션 문제 시 애플리케이션 시작 중단
-                raise RuntimeError(
-                    f"Collection validation failed: {validation_result.get('summary', 'Unknown error')}. "
-                    "Please check Qdrant setup and collection configuration."
-                )
-                
-        except Exception as collection_error:
-            logger.error(f"❌ Collection validation error: {collection_error}")
-            if "Collection validation failed" in str(collection_error):
-                # 검증 실패는 치명적 오류로 처리
-                raise
-            else:
-                # 기타 오류는 경고로 처리하고 계속 진행
-                logger.warning("⚠️ Collection validation encountered an error, continuing with legacy behavior")
-                logger.warning("This may cause runtime failures during RAG operations")
-        
-        # Phase 2A-2: AsyncPipeline 초기화
-        app_state["async_pipeline"] = AsyncPipeline(
-            resource_manager=resource_manager,
-            max_concurrent=resource_manager.config.app_max_concurrency,
-            max_queue_size=resource_manager.config.queue_max
-        )
-        
-        # 큐 시스템 시작 (중요: 워커들이 작업을 처리할 수 있도록)
-        await app_state["async_pipeline"].start_queue()
-        logger.info("🚀 AsyncPipeline with TaskQueue system initialized")
-        
-        # Phase 2A-3: ResourceManager 기반 보안 설정 업데이트
-        try:
-            from qdrant_security_config import create_default_security_config, create_secure_qdrant_clients
-            
-            # ResourceManager를 사용하여 동적 보안 설정 생성
-            updated_security_config = create_default_security_config(resource_manager)
-            app_state["qdrant_security_config"] = updated_security_config
-            
-            # 새로운 설정으로 Qdrant 클라이언트 재생성
-            updated_clients = create_secure_qdrant_clients(updated_security_config)
-            app_state["qdrant_clients"] = updated_clients
-            
-            # P1-2 전 임시 bridge: ResourceManager에 clients 연결
-            class _ClientRegistry:
-                def __init__(self, clients_map):
-                    self._clients = clients_map
-                def get_qdrant_client(self, source):
-                    return self._clients.get(source)
-            
-            resource_manager.clients = _ClientRegistry(updated_clients)
-            
-            logger.info("✅ ResourceManager 기반 보안 설정으로 업데이트 완료")
-            logger.info(f"🔐 동적 컬렉션 네임스페이스: {updated_security_config.collection_namespaces}")
-            
-        except Exception as security_update_error:
-            logger.warning(f"⚠️ 보안 설정 업데이트 실패: {security_update_error}")
-            logger.info("기존 설정을 유지합니다")
-        
-    except ImportError:
-        logger.warning("⚠️ ResourceManager not available - using legacy approach")
-    except Exception as e:
-        logger.error(f"❌ ResourceManager initialization failed: {e}")
-        # ResourceManager 초기화 실패는 애플리케이션 시작을 중단
-        raise
-    
     yield
     
     logger.info("🌙 애플리케이션 종료...")
-    
-    # AsyncPipeline TaskQueue 정리
-    if "async_pipeline" in app_state:
-        try:
-            await app_state["async_pipeline"].stop_queue()
-            logger.info("✅ TaskQueue stopped gracefully")
-        except Exception as e:
-            logger.error(f"❌ TaskQueue stop failed: {e}")
-    
-    # ResourceManager 정리
-    if "resource_manager" in app_state:
-        try:
-            await app_state["resource_manager"].cleanup()
-            logger.info("✅ ResourceManager cleanup completed")
-        except Exception as e:
-            logger.error(f"❌ ResourceManager cleanup failed: {e}")
-    
     app_state.clear()
     dialog_cache.clear()
 
-# Initialize base FastAPI app
 app = FastAPI(lifespan=lifespan)
-
-# Phase 2A-2: Circuit Breaker Dashboard Integration
-try:
-    from circuit_breaker_dashboard import router as dashboard_router
-    app.include_router(dashboard_router)
-    logger.info("🔧 Circuit Breaker Dashboard registered")
-except ImportError as e:
-    logger.warning(f"⚠️ Circuit Breaker Dashboard not available: {e}")
-
-# Import security configuration (MANDATORY FOR PRODUCTION)
-try:
-    from backend.security_config import (
-        CORS_CONFIG, 
-        QuestionRequest, 
-        EnhancedPIIMasker,
-        get_current_user,
-        SecurityMiddleware,
-        sanitize_log_message
-    )
-    SECURITY_ENABLED = True
-    logger.info("🛡️ Security module loaded successfully")
-except ImportError:
-    logger.error("❌ Security module not found! This is a critical security risk")
-    logger.warning("⚠️ Falling back to restricted configuration")
-    SECURITY_ENABLED = False
-    # Use secure CORS configuration from common security module
-    CORS_CONFIG = cors_kwargs()
-
-# Phase 3 Integration - Apply comprehensive enhancements
-try:
-    from integration import create_integrated_app
-    
-    # Transform app with Phase 3 integration
-    app = create_integrated_app(
-        existing_app=app,
-        enable_security=SECURITY_ENABLED,
-        development_mode=DEBUG_MODE
-    )
-    logger.info("✅ Phase 3 integration applied successfully")
-    
-    # Legacy middleware for compatibility (already handled in integration)
-    PHASE3_INTEGRATED = True
-    
-except ImportError as e:
-    logger.warning(f"Phase 3 integration not available: {e}")
-    PHASE3_INTEGRATED = False
-    
-    # Fallback to legacy configuration with MANDATORY security
-    app.add_middleware(CORSMiddleware, **CORS_CONFIG)
-    logger.info(f"🔒 CORS middleware configured: {len(CORS_CONFIG['allow_origins'])} origins allowed")
-    
-    # MANDATORY security middleware (always enabled for protection)
-    if SECURITY_ENABLED:
-        app.add_middleware(SecurityMiddleware)
-        logger.info("🛡️ Security middleware activated")
-        
-        # Include authentication routes
-        try:
-            from auth_routes import router as auth_router
-            app.include_router(auth_router)
-            logger.info("🔑 Authentication routes loaded successfully")
-        except ImportError:
-            logger.warning("⚠️ Authentication routes not available")
-    else:
-        logger.error("❌ Running without security middleware - PRODUCTION RISK!")
-        logger.warning("Please ensure security_config.py is available")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
+)
 
 
 # --------------------------------------------------------------------------
-# 4. Request ID Middleware for correlation (P1-3)
+# 4. 핵심 로직 함수
 # --------------------------------------------------------------------------
-@app.middleware("http")
-async def request_id_middleware(request: Request, call_next):
-    """
-    Request ID middleware for distributed tracing, correlation and metrics (P1-4)
-    - Generates or extracts request ID from headers
-    - Sets context variables for logging
-    - Adds response headers for client correlation
-    - Collects HTTP metrics for monitoring
-    """
-    
-    # P1-4: Start timing for latency metrics
-    start_time = time.perf_counter()
-    
-    # Extract or generate request ID
-    request_id = request.headers.get("x-request-id")
-    if not request_id:
-        request_id = str(uuid.uuid4())
-    
-    # Extract source from query params or path
-    source = request.query_params.get("source", "unknown")
-    if "/mail" in str(request.url):
-        source = "mail"
-    elif "/doc" in str(request.url):
-        source = "doc"
-    
-    # Extract scope for dual routing (Header > Query > Default)
-    scope = (
-        request.headers.get("x-qdrant-scope") or
-        request.query_params.get("db_scope") or
-        os.getenv("DEFAULT_DB_SCOPE", "personal")
-    )
-    
-    # Validate scope
-    if scope not in ["personal", "dept"]:
-        logger.warning(f"Invalid scope '{scope}', falling back to personal")
-        scope = "personal"
-    
-    # Set context for logging with scope
-    set_request_context(request_id, source, "-", scope)
-    
-    # Add scope to request state for later use
-    request.state.scope = scope
-    
-    # P1-4: Track active connections
-    ACTIVE_CONNECTIONS.inc()
-    
-    try:
-        # Process request
-        response = await call_next(request)
-        
-        # Add correlation headers
-        response.headers["x-request-id"] = request_id
-        response.headers["x-response-source"] = source
-        response.headers["x-used-scope"] = scope  # Add scope for client verification
-        
-        # Add fallback header if fallback was used
-        if getattr(request.state, "fallback_used", False):
-            response.headers["x-fallback-used"] = "true"
-        
-        # P1-4: Record metrics
-        duration = time.perf_counter() - start_time
-        path = str(request.url.path)
-        method = request.method
-        status = response.status_code
-        
-        # Skip metrics endpoint itself to avoid recursion
-        if path != "/metrics":
-            REQ_COUNT.labels(method=method, path=path, status=str(status)).inc()
-            REQ_LATENCY.labels(method=method, path=path).observe(duration)
-        
-        # Log access for audit
-        if audit_logger.enabled:
-            audit_logger.log_access(
-                resource=path,
-                action=method,
-                result="success",
-                user_id=request.headers.get("x-user-id")
-            )
-        
-        return response
-        
-    except Exception as e:
-        # P1-4: Record error metrics
-        duration = time.perf_counter() - start_time
-        path = str(request.url.path)
-        method = request.method
-        
-        if path != "/metrics":
-            REQ_COUNT.labels(method=method, path=path, status="500").inc()
-            REQ_LATENCY.labels(method=method, path=path).observe(duration)
-        
-        logger.error(f"Request failed: {str(e)}")
-        
-        # Log failure for audit
-        if audit_logger.enabled:
-            audit_logger.log_access(
-                resource=path,
-                action=method,
-                result="error",
-                user_id=request.headers.get("x-user-id")
-            )
-        raise
-        
-    finally:
-        # P1-4: Decrement active connections
-        ACTIVE_CONNECTIONS.dec()
-        # Clear context
-        clear_request_context()
-
-
-# --------------------------------------------------------------------------
-# 5. 핵심 로직 함수 (이전 섹션 4를 5로 변경)
-# --------------------------------------------------------------------------
-
-def _get_current_namespace_mapping():
-    """현재 ResourceManager 설정에 따른 네임스페이스 매핑을 반환합니다."""
-    resource_manager = app_state.get("resource_manager")
-    if resource_manager:
-        try:
-            # ResourceManager를 통한 동적 매핑 생성
-            return {
-                "mail": resource_manager.get_default_collection_name("mail", "my_documents"),
-                "doc": resource_manager.get_default_collection_name("doc", "my_documents")
-            }
-        except Exception as e:
-            logger.warning(f"Failed to get namespace mapping from ResourceManager: {e}")
-    
-    # Fallback to legacy mapping
-    return {
-        "mail": "mail_my_documents", 
-        "doc": "doc_my_documents"
-    }
-
-
 def format_context(payload: dict) -> str:
     """검색된 컨텍스트를 LLM 프롬프트에 맞게 포맷합니다."""
     source_type = payload.get("source_type")
@@ -839,24 +220,40 @@ def format_context(payload: dict) -> str:
     return f"[참고자료: 기타]\n{raw_text}"
 
 async def stream_llm_response(prompt: str, model: str, request_id: str):
-    """Stream LLM response via ResourceManager"""
-    logger.info(f"[{request_id}] LLM streaming via ResourceManager (model: {model})...")
+    """Ollama API를 통해 LLM 응답을 스트리밍합니다."""
+    logger.info(f"[{request_id}] 최종 답변 스트리밍 중 (모델: {model})...")
+    
+    json_data = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": "당신은 HD현대미포의 한국어 AI 어시스턴트입니다. 반드시 한국어로만 응답하세요. 영어나 다른 언어는 절대 사용하지 마세요. 모든 답변은 정중하고 명확한 한국어로 작성해주세요."},
+            {"role": "user", "content": prompt}
+        ],
+        "stream": True,
+        "options": {"temperature": 0.3}  # Slight temperature for more natural Korean
+    }
     
     try:
-        rm = app_state["resource_manager"]
-        async_gen = await rm.generate_llm_response(prompt, model, stream=True)
-        async for token in async_gen:
-            # NDJSON/SSE 어떤 형식이든 상위에서 래핑하므로 여기선 텍스트만 토스
-            yield token
+        with requests.post(
+            config.OLLAMA_API_URL, json=json_data, timeout=config.LLM_TIMEOUT, stream=True
+        ) as res:
+            res.raise_for_status()
+            # Increase buffer size to 8KB for better streaming performance
+            for chunk in res.iter_lines(chunk_size=8192):
+                if not chunk: continue
+                try:
+                    data = json.loads(chunk.decode('utf-8'))
+                    content = data.get("message", {}).get("content", "")
+                    yield content
+                    if data.get("done"): break
+                except json.JSONDecodeError:
+                    logger.warning(f"[{request_id}] JSON 청크 디코딩 실패: {chunk}")
     except Exception as e:
         logger.error(f"[{request_id}] LLM 스트리밍 실패: {e}")
         yield "답변 생성 중 오류가 발생했습니다."
 
-def search_qdrant(question: str, request_id: str, client: QdrantClient, config: AppConfig, source: str = "mail", request: Request = None) -> tuple[str, list[dict]]:
+def search_qdrant(question: str, request_id: str, client: QdrantClient, config: AppConfig, source: str = "mail") -> tuple[str, list[dict]]:
     """Qdrant에서 관련 문서를 검색합니다."""
-    import time
-    start_time = time.time()
-    
     embeddings = app_state.get("embeddings")
     if not client or not embeddings:
         logger.warning(f"[{request_id}] Qdrant client or embeddings not available")
@@ -875,23 +272,8 @@ def search_qdrant(question: str, request_id: str, client: QdrantClient, config: 
     if cache_key in embedding_cache:
         query_vector = embedding_cache[cache_key]
         logger.debug(f"[{request_id}] 🎯 Using cached embedding for query")
-        # P1-4: Record cache hit
-        CACHE_HITS.labels(cache_type="embedding").inc()
     else:
-        # P1-4: Start embedding timing
-        embed_start = time.perf_counter()
-        
-        # P1-6: Use inference_mode for better performance
-        if hasattr(torch, 'inference_mode'):
-            with torch.inference_mode():
-                query_vector = embeddings.embed_query(normalized_query)
-        else:
-            query_vector = embeddings.embed_query(normalized_query)
-        
-        # P1-4: Record embedding latency
-        EMBED_LAT.labels(backend="huggingface").observe(time.perf_counter() - embed_start)
-        # P1-4: Record cache miss
-        CACHE_MISSES.labels(cache_type="embedding").inc()
+        query_vector = embeddings.embed_query(normalized_query)
         
         # Add to cache with size limit
         if len(embedding_cache) >= MAX_CACHE_SIZE:
@@ -904,135 +286,40 @@ def search_qdrant(question: str, request_id: str, client: QdrantClient, config: 
     
     logger.debug(f"[{request_id}] Query vector created - dimension: {len(query_vector)}")
 
-    # 보안·분리 설계: 소스별 전용 컬렉션 검색 (ResourceManager 통합)
-    resource_manager = app_state.get("resource_manager")
-    if resource_manager:
-        try:
-            collection_name = resource_manager.get_default_collection_name(source, "my_documents")
-            logger.debug(f"[{request_id}] 🏷️ Collection name from ResourceManager: {collection_name}")
-        except Exception as e:
-            logger.error(f"[{request_id}] ❌ Failed to get collection name from ResourceManager: {e}")
-            return "", []
-    else:
-        # Fallback to legacy naming for backward compatibility
-        legacy_namespaces = {"mail": "mail_my_documents", "doc": "doc_my_documents"}
-        collection_name = legacy_namespaces.get(source)
-        if not collection_name:
-            logger.error(f"[{request_id}] ❌ 지원되지 않는 소스 타입: {source}")
-            return "", []
-        logger.warning(f"[{request_id}] ⚠️ Using legacy collection naming: {collection_name}")
-    
     all_hits = []
-    try:
-        logger.info(f"[{request_id}] 🔎 Searching namespace-separated collection: '{collection_name}' (source: {source})")
-        logger.debug(f"[{request_id}] Search params - limit: {config.QDRANT_SEARCH_LIMIT}, threshold: {config.QDRANT_SCORE_THRESHOLD}")
-        
-        # ResourceManager 통합 검색 사용 (P1-2)
+    for collection_name in config.QDRANT_COLLECTIONS:
         try:
-            import asyncio
+            logger.info(f"[{request_id}] 🔎 Searching collection: '{collection_name}'")
+            logger.debug(f"[{request_id}] Search params - limit: {config.QDRANT_SEARCH_LIMIT}, threshold: {config.QDRANT_SCORE_THRESHOLD}")
             
-            # P1-4: Start search timing
-            search_start = time.perf_counter()
+            hits = client.search(
+                collection_name=collection_name,
+                query_vector=query_vector,
+                limit=config.QDRANT_SEARCH_LIMIT,
+                score_threshold=config.QDRANT_SCORE_THRESHOLD,
+                search_params=models.SearchParams(**config.QDRANT_SEARCH_PARAMS)
+            )
             
-            # ResourceManager의 통합 검색 메서드 사용
-            if asyncio.iscoroutinefunction(resource_manager.search_vectors):
-                # 비동기 호출을 동기적으로 실행
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    search_results = loop.run_until_complete(
-                        resource_manager.search_vectors(
-                            source_type=source,
-                            query_vector=query_vector,
-                            limit=config.QDRANT_SEARCH_LIMIT,
-                            score_threshold=config.QDRANT_SCORE_THRESHOLD,
-                            with_payload=True,
-                            with_vectors=False,
-                            search_params=models.SearchParams(**config.QDRANT_SEARCH_PARAMS),
-                            request=request
-                        )
-                    )
-                finally:
-                    loop.close()
+            if hits:
+                logger.info(f"[{request_id}] ✅ Found {len(hits)} hits in '{collection_name}'")
+                if DEBUG_MODE:
+                    for i, hit in enumerate(hits[:5], 1):  # 상위 5개만 상세 로깅
+                        logger.debug(f"[{request_id}]  Hit {i}: score={hit.score:.4f}, id={hit.id}")
+                        logger.debug(f"[{request_id}]  Metadata keys: {list(hit.payload.keys())}")
+                        if VERBOSE_LOGGING:
+                            # 메타데이터 일부 출력 (텍스트 제외)
+                            meta_preview = {k: v for k, v in hit.payload.items() if k != 'text' and k != 'embedding'}
+                            logger.debug(f"[{request_id}]  Metadata preview: {meta_preview}")
             else:
-                search_results = resource_manager.search_vectors(
-                    source_type=source,
-                    query_vector=query_vector,
-                    limit=config.QDRANT_SEARCH_LIMIT,
-                    score_threshold=config.QDRANT_SCORE_THRESHOLD,
-                    with_payload=True,
-                    with_vectors=False,
-                    search_params=models.SearchParams(**config.QDRANT_SEARCH_PARAMS),
-                    request=request
-                )
+                logger.warning(f"[{request_id}] ⚠️ No hits found in '{collection_name}' (threshold: {config.QDRANT_SCORE_THRESHOLD})")
             
-            # P1-4: Record search latency
-            SEARCH_LAT.labels(backend="qdrant", source=source).observe(time.perf_counter() - search_start)
-            
-            # 결과 형식 변환 (ResourceManager 형식 → Qdrant 형식)
-            hits = []
-            for result in search_results:
-                hit = type('ScoredPoint', (), {})()
-                hit.id = result.get('id', '')
-                hit.score = result.get('score', 0.0)
-                hit.payload = result.get('payload', {})
-                hits.append(hit)
-                
+            all_hits.extend(hits)
         except Exception as e:
-            logger.error(f"ResourceManager search failed, falling back: {e}")
-            # P1-4: Record Qdrant error
-            QDRANT_ERR.labels(type="search_error").inc()
-            # 폴백: 기존 방식 사용
-            if hasattr(client, 'search') and hasattr(client, 'config'):
-                hits = client.search(
-                    query_vector=query_vector,
-                    limit=config.QDRANT_SEARCH_LIMIT,
-                    score_threshold=config.QDRANT_SCORE_THRESHOLD,
-                    search_params=models.SearchParams(**config.QDRANT_SEARCH_PARAMS)
-                )
-            else:
-                hits = client.search(
-                    collection_name=collection_name,
-                    query_vector=query_vector,
-                    limit=config.QDRANT_SEARCH_LIMIT,
-                    score_threshold=config.QDRANT_SCORE_THRESHOLD,
-                    search_params=models.SearchParams(**config.QDRANT_SEARCH_PARAMS)
-                )
-        
-        if hits:
-            logger.info(f"[{request_id}] ✅ Found {len(hits)} hits in '{collection_name}'")
-            if DEBUG_MODE:
-                for i, hit in enumerate(hits[:5], 1):  # 상위 5개만 상세 로깅
-                    logger.debug(f"[{request_id}]   Hit {i}: score={hit.score:.4f}, id={hit.id}")
-                    logger.debug(f"[{request_id}]   Metadata keys: {list(hit.payload.keys())}")
-                    if VERBOSE_LOGGING:
-                        # 메타데이터 일부 출력 (텍스트 제외)
-                        meta_preview = {k: v for k, v in hit.payload.items() if k != 'text' and k != 'embedding'}
-                        logger.debug(f"[{request_id}]   Metadata preview: {meta_preview}")
-        else:
-            logger.warning(f"[{request_id}] ⚠️ No hits found in '{collection_name}' (threshold: {config.QDRANT_SCORE_THRESHOLD})")
-        
-        all_hits.extend(hits)
-    except Exception as e:
-        logger.error(f"[{request_id}] ❌ 컬렉션 '{collection_name}' 검색 실패: {e}", exc_info=DEBUG_MODE)
-        # 보안 강화: 예외 상황에서도 빈 결과 반환
-        return "", []
+            logger.error(f"[{request_id}] ❌ 컬렉션 '{collection_name}' 검색 실패: {e}", exc_info=DEBUG_MODE)
 
     if not all_hits:
-        logger.warning(f"[{request_id}] ❌ No hits found in collection '{collection_name}'")
+        logger.warning(f"[{request_id}] ❌ No hits found across all collections")
         return "", []
-
-    # Audit log for vector search
-    query_hash = get_query_hash(normalized_query)
-    audit_logger.log_search(
-        source=source,
-        namespace=collection_name,
-        query_hash=query_hash,
-        limit=config.QDRANT_SEARCH_LIMIT,
-        threshold=config.QDRANT_SCORE_THRESHOLD,
-        result_count=len(all_hits),
-        latency_ms=(time.time() - start_time) * 1000
-    )
 
     # 중복 제거 및 정렬
     logger.info(f"[{request_id}] 📊 Total hits before deduplication: {len(all_hits)}")
@@ -1055,16 +342,16 @@ def search_qdrant(question: str, request_id: str, client: QdrantClient, config: 
         text_preview = text[:300] + "..." if len(text) > 300 else text
         
         logger.info(f"[{request_id}] 📄 문서 {i}:")
-        logger.info(f"[{request_id}]   점수: {hit.score:.4f}")
-        logger.info(f"[{request_id}]   제목: {title}")
-        logger.info(f"[{request_id}]   발신자: {sender}")
-        logger.info(f"[{request_id}]   날짜: {date}")
-        logger.info(f"[{request_id}]   텍스트 미리보기:")
-        logger.info(f"[{request_id}]   {text_preview}")
+        logger.info(f"[{request_id}]  점수: {hit.score:.4f}")
+        logger.info(f"[{request_id}]  제목: {title}")
+        logger.info(f"[{request_id}]  발신자: {sender}")
+        logger.info(f"[{request_id}]  날짜: {date}")
+        logger.info(f"[{request_id}]  텍스트 미리보기:")
+        logger.info(f"[{request_id}]  {text_preview}")
         logger.info(f"[{request_id}] " + "-" * 40)
         
         if DEBUG_MODE and hit.score < 0.6:
-            logger.warning(f"[{request_id}]   ⚠️ Low score detected: {hit.score:.4f}")
+            logger.warning(f"[{request_id}]  ⚠️ Low score detected: {hit.score:.4f}")
 
     contexts = [format_context(hit.payload) for hit in top_hits]
     
@@ -1104,9 +391,9 @@ def search_qdrant(question: str, request_id: str, client: QdrantClient, config: 
             # 문서 모드: 파일 경로 처리
             # 파일 경로는 다양한 필드명으로 저장될 수 있음
             file_path = (hit.payload.get("file_path") or 
-                        hit.payload.get("document_path") or 
-                        hit.payload.get("path") or 
-                        hit.payload.get("link"))
+                         hit.payload.get("document_path") or 
+                         hit.payload.get("path") or 
+                         hit.payload.get("link"))
             
             if file_path:
                 # 문서 제목 추출
@@ -1147,7 +434,8 @@ def root():
             "GET /health": "Health check",
             "GET /status": "Service status check",
             "POST /ask": "RAG question answering",
-            "GET /open_mail": "Open mail in Outlook (Windows only)"
+            "POST /open-mail": "Open mail (Outlook / http / file)",
+            "POST /open-file": "Open department file (UNC / file)"
         },
         "description": "HD현대미포 선각기술부 RAG 시스템 백엔드"
     }
@@ -1158,7 +446,7 @@ def health_check():
 
 @app.get("/status")
 async def status():
-    """보안·분리 설계가 적용된 시스템 상태 확인 (Dual Routing 포함)"""
+    """프런트가 더 이상 외부 IP를 직접 치지 않도록, 백엔드가 올라마/두 Qdrant를 확인해 결과를 돌려줍니다."""
     import asyncio
     import aiohttp
     
@@ -1171,179 +459,157 @@ async def status():
         except Exception:
             return False
     
-    # Check if QdrantRouter is available for dual routing
-    router = app_state.get("qdrant_router")
-    if router:
-        # Get aggregated status from router
-        router_status = await router.get_aggregated_status()
-    else:
-        router_status = None
-    
-    # 기본 서비스 상태 확인 (legacy compatibility)
+    # 병렬로 모든 서비스 체크
     ollama_url = config.OLLAMA_API_URL.replace("/api/chat", "/")
     qdrant_mail_url = f"http://{config.MAIL_QDRANT_HOST}:{config.MAIL_QDRANT_PORT}/"
     qdrant_doc_url = f"http://{config.DOC_QDRANT_HOST}:{config.DOC_QDRANT_PORT}/"
     
-    basic_results = await asyncio.gather(
+    results = await asyncio.gather(
         ping_async(ollama_url),
         ping_async(qdrant_mail_url),
         ping_async(qdrant_doc_url),
         return_exceptions=True
     )
     
-    # 보안 클라이언트 상태 확인
-    security_status = {}
-    if "qdrant_clients" in app_state:
-        for source_type, client in app_state["qdrant_clients"].items():
-            try:
-                if hasattr(client, 'health_check'):
-                    # SecureQdrantClient 사용
-                    health_info = client.health_check()
-                    security_status[f"secure_{source_type}"] = {
-                        "connected": health_info.get("connection_ok", False),
-                        "collection_exists": health_info.get("collection_exists", False),
-                        "namespace": health_info.get("collection_namespace", "unknown"),
-                        "vectors_count": health_info.get("vectors_count", 0),
-                        "security_enabled": True
-                    }
-                else:
-                    # 레거시 클라이언트 사용
-                    collections = client.get_collections()
-                    security_status[f"legacy_{source_type}"] = {
-                        "connected": True,
-                        "collections_count": len(collections.collections),
-                        "security_enabled": False
-                    }
-            except Exception as e:
-                security_status[f"error_{source_type}"] = {
-                    "connected": False,
-                    "error": str(e)[:100],  # 에러 메시지 길이 제한
-                    "security_enabled": False
-                }
-    
-    # 보안 설정 정보
-    security_config_info = {}
-    if "qdrant_security_config" in app_state:
-        sec_config = app_state["qdrant_security_config"]
-        security_config_info = {
-            "namespaces_configured": len(sec_config.collection_namespaces),
-            "allowed_sources": sec_config.allowed_sources,
-            "max_search_limit": sec_config.max_search_limit,
-            "audit_logging": sec_config.audit_logging,
-            "ssl_enabled": sec_config.enable_ssl
-        }
-    
-    status_response = {
-        # 기본 서비스 상태
-        "fastapi": True,
-        "ollama": basic_results[0] if not isinstance(basic_results[0], Exception) else False,
-        "qdrant_mail": basic_results[1] if not isinstance(basic_results[1], Exception) else False,
-        "qdrant_doc": basic_results[2] if not isinstance(basic_results[2], Exception) else False,
-        
-        # 보안·분리 설계 상태
-        "security_clients": security_status,
-        "security_config": security_config_info,
-        "namespace_separation": _get_current_namespace_mapping(),
-        
-        # 시스템 정보
-        "timestamp": datetime.datetime.now().isoformat(),
-        "version": "2.0.0-security",
-        "phase": "2A-0 보안·분리 설계 적용됨"
+    return {
+        "fastapi": True,  # 살아있으니 True
+        "ollama": results[0] if not isinstance(results[0], Exception) else False,
+        "qdrant_mail": results[1] if not isinstance(results[1], Exception) else False,
+        "qdrant_doc": results[2] if not isinstance(results[2], Exception) else False,
     }
-    
-    # Add dual routing status if available
-    if router_status:
-        status_response.update(router_status)
-    
-    return status_response
-
-
-# --------------------------------------------------------------------------
-# P1-4: Metrics endpoint for Prometheus monitoring
-# --------------------------------------------------------------------------
-@app.get("/metrics")
-async def get_metrics(request: Request):
-    """
-    Prometheus metrics endpoint (P1-4)
-    - Security: Only accessible from localhost for security
-    - Returns metrics in Prometheus text format
-    """
-    from prometheus_client import generate_latest
-    from fastapi.responses import PlainTextResponse
-    
-    # Security check: only allow localhost access
-    client_host = request.client.host if request.client else None
-    if client_host not in ["127.0.0.1", "localhost", "::1"]:
-        raise HTTPException(status_code=403, detail="Metrics only accessible from localhost")
-    
-    # Generate metrics using the registry from logging module
-    from backend.common.logging import registry
-    metrics = generate_latest(registry)
-    
-    return PlainTextResponse(content=metrics.decode('utf-8'), media_type="text/plain; version=0.0.4")
-
 
 @app.post("/open_file")
+@app.post("/open-file")  # 프론트엔드 호환용 하이픈 버전 추가
 async def open_file(request: Request):
-    """파일 경로를 받아서 파일을 엽니다 (부서 문서용)."""
-    try:
-        body = await request.json()
-        file_path = body.get("file_path", "")
+    """
+    문서 열기(부서 데이터).
+    - 입력: file_path | path | display_url | link
+    - 지원: file:/// URI, UNC(\server\share\...), 로컬(C:\...)
+    """
+    import os
+    from fastapi import HTTPException
+    import subprocess
+    from urllib.parse import urlparse, unquote
+    
+    # --- UNC 강제 보정: IP 시작 경로의 경계/접두 \\ 회복 ---
+    def _force_unc(p: str) -> str:
+        s = p
         
-        logger.info(f"받은 파일 경로: {file_path}")
+        # 0) 이미 \\로 시작하면 그대로 두되, \\server 다음 구분자 검사
+        if s.startswith("\\\\"):
+            return s
         
-        if not file_path:
-            raise HTTPException(status_code=400, detail="파일 경로가 비어있습니다.")
+        # 1) "203.228.239.6..." 처럼 IP로 시작하는지 판별
+        i = 0
+        while i < len(s) and (s[i].isdigit() or s[i] == "."):
+            i += 1
         
-        # Handle various path formats
-        # Remove quotes if present
-        file_path = file_path.strip('"').strip("'")
+        ip = s[:i]
+        rest = s[i:]
         
-        # Handle file:// URLs
-        if file_path.startswith('file:///'):
-            # Convert file:///C:/path to C:/path
-            file_path = file_path[8:]  # Remove 'file:///'
-        elif file_path.startswith('file://'):
-            # Convert file://path to path
-            file_path = file_path[7:]  # Remove 'file://'
+        def _looks_like_ip(x: str) -> bool:
+            parts = x.split(".")
+            if len(parts) != 4:
+                return False
+            for part in parts:
+                if not part.isdigit():
+                    return False
+                n = int(part)
+                if n < 0 or n > 255:
+                    return False
+            return True
         
-        # Convert forward slashes to backslashes for Windows
-        if os.name == 'nt':
-            file_path = file_path.replace('/', '\\')
+        if _looks_like_ip(ip):
+            if not rest.startswith("\\"):
+                rest = "\\" + rest.lstrip("\\")
+            s = "\\\\" + ip + rest
         
-        logger.info(f"처리된 파일 경로: {file_path}")
-        
-        # Check if file exists
-        if os.path.exists(file_path):
-            if os.name == 'nt':
-                # Windows에서 os.startfile 사용
-                os.startfile(file_path)
-                logger.info(f"파일 열기 성공: {file_path}")
-                return {"status": "success", "message": "파일을 열었습니다."}
-            else:
-                # Non-Windows 시스템에서는 지원하지 않음
-                raise HTTPException(status_code=501, detail="파일 열기는 Windows 환경에서만 지원됩니다.")
+        return s
+
+    # 0) 요청 파싱
+    body = await request.json()
+    logger.info(f"받은 파일 경로(raw): {body.get('file_path') or body.get('path') or body.get('display_url') or body.get('link')}")
+    raw = (
+        body.get("file_path")
+        or body.get("path")
+        or body.get("display_url")
+        or body.get("link")
+        or ""
+    )
+    if not raw:
+        raise HTTPException(status_code=400, detail="파일 경로가 비어있습니다.")
+
+    # 1) 조각(#fragment) 제거 + 양끝 공백/따옴표 제거
+    def strip_fragment(p: str) -> str:
+        return str(p).split("#", 1)[0]
+    path = strip_fragment(raw).strip().strip('"').strip("'")
+
+    # 2) file:/// → Windows 경로로 변환 (정규식 사용하지 않음)
+    if path.lower().startswith("file://"):
+        u = urlparse(path)
+        if u.netloc:
+            path = "\\\\" + u.netloc + unquote(u.path.replace("/", "\\"))
         else:
-            logger.error(f"파일을 찾을 수 없습니다: {file_path}")
-            raise HTTPException(status_code=404, detail=f"파일을 찾을 수 없습니다: {file_path}")
-                
-    except HTTPException:
-        # HTTPException은 그대로 다시 발생
-        raise
-    except Exception as e:
-        logger.error(f"파일 열기 실패: {e}")
-        raise HTTPException(status_code=500, detail=f"파일 열기 중 오류 발생: {str(e)}")
+            path = unquote(u.path.replace("/", "\\"))
+    else:
+        # 3) 줄바꿈을 백슬래시로 + 슬래시 통일
+        path = path.replace("\r\n", "\\").replace("\r", "\\").replace("\n", "\\")
+        path = path.replace("/", "\\")
+
+        # 4) 백슬래시 주변 공백만 정돈(세그먼트 내용은 보전)
+        path = re.sub(r"\s*\\\s*", r"\\", path)
+
+        # 5) 세그먼트별 좌우 공백 제거
+        is_unc = path.startswith("\\\\")
+        parts = [seg.strip() for seg in path.split("\\") if seg]
+        path = ("\\\\" if is_unc else "") + "\\".join(parts)
+    
+    # 새로운 UNC 보정 함수 적용
+    path = _force_unc(path)
+    logger.info(f"정규화된 파일 경로(안전): {path}")
+
+    # 6) 열기
+    if os.path.exists(path):
+        if os.name == "nt":
+            os.startfile(path)
+            logger.info(f"파일 열기 성공: {path}")
+            return {"status": "success", "path": path}
+        else:
+            raise HTTPException(status_code=501, detail="Windows에서만 지원됩니다.")
+    else:
+        logger.error(f"파일을 찾을 수 없습니다: {path}")
+        parent = os.path.dirname(path)
+        if parent and os.path.isdir(parent):
+            try:
+                subprocess.Popen(["explorer.exe", parent])
+            except Exception:
+                pass
+        raise HTTPException(status_code=404, detail=f"파일을 찾을 수 없습니다: {path}")
 
 @app.post("/open-mail")
+@app.post("/open_mail")  # 구버전/프런트 혼용 대비 호환 라우트 추가
 async def open_mail(request: Request):
     """통합된 메일/파일 열기 엔드포인트 (POST 방식)"""
     import webbrowser
     
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     
-    # 다양한 키 이름 지원
-    entry_id = body.get("entry_id") or body.get("id") or body.get("link_key", "")
-    display_url = body.get("display_url") or body.get("link") or body.get("url", "")
+    # entry_id는 outlook://... 또는 MAPI EntryID가 들어올 수 있음
+    entry_id = (body.get("entry_id")
+                or body.get("id")
+                or body.get("link_key")
+                or body.get("link")
+                or "")
+    display_url = (body.get("display_url")
+                   or body.get("url")
+                   or "")
+    
+    logger.info(f"[open_mail] keys={list(body.keys())} "
+                f"entry_id(head)={str(entry_id)[:40]} "
+                f"display_url(head)={str(display_url)[:40]}")
     
     # link_key가 있으면 디코딩
     if entry_id:
@@ -1352,14 +618,19 @@ async def open_mail(request: Request):
     # 1. file:/// 스키마 처리
     if entry_id and entry_id.startswith("file:///"):
         try:
+            # file:/// 이후 경로 추출
             path = urllib.parse.unquote(entry_id[8:])
+            # Windows 경로 정규화 (슬래시를 백슬래시로 변환)
+            path = os.path.normpath(path)
+            logger.info(f"[open_mail] 정규화된 경로: {path}")
+            
             if os.path.exists(path):
                 os.startfile(path)
                 return {"ok": True, "via": "file", "path": path}
             else:
                 raise FileNotFoundError(f"파일을 찾을 수 없습니다: {path}")
         except Exception as e:
-            logger.error(f"파일 열기 실패: {e}")
+            logger.error(f"[open_mail] file:/// 열기 실패: {e}")
             raise HTTPException(status_code=400, detail=str(e))
     
     # 2. HTTP(S) 웹 링크 처리
@@ -1370,25 +641,53 @@ async def open_mail(request: Request):
         except Exception as e:
             logger.error(f"웹 링크 열기 실패: {e}")
     
-    # 3. outlook:// 스키마 처리
-    if entry_id and entry_id.startswith("outlook://"):
+    # 3. outlook:// 스키마 처리 (및 일반 EntryID 포함)
+    if entry_id:
         if not WIN_COM_AVAILABLE:
             raise HTTPException(status_code=501, detail="Outlook 연동이 필요합니다(Windows/pywin32).")
-        
+
         pythoncom.CoInitialize()
         try:
-            mapi_id = entry_id[10:]  # outlook:// 제거
+            # outlook:// 접두어 제거
+            mapi_id = entry_id
+            if mapi_id.lower().startswith("outlook://"):
+                mapi_id = mapi_id[10:]
+            mapi_id = mapi_id.strip().strip('"').strip("'")
+
             outlook = win32com.client.Dispatch("Outlook.Application")
-            mapi_ns = outlook.GetNamespace("MAPI")
-            item = mapi_ns.GetItemFromID(mapi_id)
-            item.Display(True)
-            return {"ok": True, "via": "outlook", "entry_id": mapi_id}
+            session = outlook.Session  # GetNamespace("MAPI")와 동일
+
+            # 1) 기본 스토어 시도
+            try:
+                item = session.GetItemFromID(mapi_id)
+                item.Display(True)
+                return {"ok": True, "via": "outlook", "entry_id": mapi_id, "store": "default"}
+            except Exception:
+                logger.info("[open_mail] Default store 조회 실패, Stores 순회 시도")
+
+            # 2) 모든 Store 전수 탐색
+            for store in session.Stores:
+                try:
+                    item = session.GetItemFromID(mapi_id, store.StoreID)
+                    item.Display(True)
+                    return {"ok": True, "via": "outlook", "entry_id": mapi_id, "store": store.DisplayName}
+                except Exception:
+                    logger.debug(f"[open_mail] Store '{store.DisplayName}' 미적중")
+                    continue
+
+            # 3) 못 찾으면 명확히 에러
+            raise HTTPException(
+                status_code=404,
+                detail="Outlook에서 해당 메시지를 찾지 못했습니다(EntryID/Store 불일치/만료)."
+            )
+
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"Outlook 메일 열기 실패: {e}")
+            logger.error(f"Outlook 메일 열기 실패: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Outlook 메일 열기 실패: {e}")
         finally:
             pythoncom.CoUninitialize()
-    
     # 4. 일반 EntryID 처리 (outlook:// 없이)
     if entry_id and not entry_id.startswith(("file://", "http://", "https://")):
         if not WIN_COM_AVAILABLE:
@@ -1410,245 +709,51 @@ async def open_mail(request: Request):
     # 아무것도 제공되지 않은 경우
     raise HTTPException(status_code=400, detail="entry_id 또는 display_url이 필요합니다.")
 
-@app.options("/ask")
-async def ask_options():
-    """OPTIONS preflight handler for /ask endpoint - simplified for CORS preflight"""
-    return Response(
-        status_code=200,
-        headers={
-            "Allow": "POST, OPTIONS",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, X-Qdrant-Scope",
-            "Access-Control-Max-Age": "86400"  # Cache preflight for 24 hours
-        }
-    )
-
 @app.post("/ask")
-async def ask(ask_request: AskRequest, request: Request):
-    """GPU 가속 RAG 답변을 스트리밍합니다."""
-    request_id = ask_request.request_id
-    logger.info(f"🚀 GPU RAG REQUEST START: {request_id}")
+async def ask(req: Request):
+    """사용자 질문에 대한 RAG 답변을 스트리밍합니다."""
+    request_id = str(uuid.uuid4())
+    logger.info(f"--- RAG REQUEST START: {request_id} ---")
 
-    try:
-        # P1-4: Start RAG timing
-        rag_start = time.perf_counter()
-        
-        # AsyncPipeline 사용 여부 확인
-        async_pipeline = app_state.get("async_pipeline")
-        if async_pipeline:
-            # GPU 가속 경로
-            result = await ask_with_gpu_acceleration(ask_request, async_pipeline, request)
-            # P1-4: Record successful RAG request
-            RAG_REQ.labels(source=ask_request.source.value, result="success").inc()
-            return result
-        else:
-            # 레거시 경로 (기존 코드 유지)
-            result = await ask_legacy(ask_request, request)
-            # P1-4: Record successful RAG request
-            RAG_REQ.labels(source=ask_request.source.value, result="success").inc()
-            return result
-    
-    except Exception as e:
-        # P1-4: Record failed RAG request
-        RAG_REQ.labels(source=ask_request.source.value, result="error").inc()
-        logger.error(f"❌ RAG request failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-
-async def ask_with_gpu_acceleration(ask_request: AskRequest, pipeline: AsyncPipeline, request: Request):
-    """GPU 가속을 사용한 새로운 RAG 엔드포인트"""
-    request_id = ask_request.request_id
-    
-    # 인사말 체크
-    if any(greet in ask_request.query for greet in config.GREETINGS):
-        async def greeting_stream():
-            yield json.dumps({
-                "status": "completed",
-                "content": "안녕하세요! 무엇을 도와드릴까요?", 
-                "references": [],
-                "metadata": {"request_id": request_id, "gpu_accelerated": True}
-            }, ensure_ascii=False)
-        return StreamingResponse(greeting_stream(), media_type="application/x-ndjson")
-    
-    try:
-        # GPU 가속 검색 실행
-        search_result = await pipeline.run_search(
-            query=ask_request.query,
-            source_type=ask_request.source.value,
-            limit=ask_request.top_k,
-            score_threshold=0.3
-        )
-        
-        results = search_result["results"]
-        metadata = search_result["metadata"]
-        
-        logger.info(f"[{request_id}] ⚡ GPU search completed: {metadata['total_time_ms']:.1f}ms on {metadata['device']}")
-        
-        if not results:
-            async def no_context_stream():
-                yield json.dumps({
-                    "status": "completed",
-                    "content": "관련 정보를 찾을 수 없습니다.",
-                    "references": [],
-                    "metadata": metadata
-                }, ensure_ascii=False)
-            return StreamingResponse(no_context_stream(), media_type="application/x-ndjson")
-        
-        # 컨텍스트 구성
-        context_parts = []
-        references = []
-        
-        for i, result in enumerate(results[:3], 1):
-            payload = result.get("payload", {})
-            text = payload.get("text", "")[:500]  # 500자 제한
-            
-            if ask_request.source.value == "mail":
-                subject = payload.get("mail_subject", "제목 없음")
-                sender = payload.get("sender", "발송자 미상")
-                context_parts.append(f"메일 {i}: {subject}\n발송자: {sender}\n내용: {text}")
-                
-                references.append({
-                    "title": f"{subject} ({sender})",
-                    "link": payload.get("link", ""),
-                    "type": "mail"
-                })
-            else:
-                doc_name = payload.get("document_name", "문서명 미상")
-                context_parts.append(f"문서 {i}: {doc_name}\n내용: {text}")
-                
-                references.append({
-                    "title": doc_name,
-                    "link": payload.get("document_path", ""),
-                    "type": "document"
-                })
-        
-        context_text = "\n\n".join(context_parts)
-        
-        # 소스별 프롬프트 생성
-        if ask_request.source.value == "mail":
-            system_prompt = dedent(f"""\
-                당신은 HD현대미포 선각기술부의 메일 검색 비서입니다.
-                반드시 한국어로 간결하게 답변하세요.
-                
-                질문: {ask_request.query}
-
-                참고 메일:
-                {context_text}
-                
-                답변 규칙:
-                - 한국어로만 답변
-                - 600자 이내로 답변  
-                - 불릿 포인트 5개 이내
-                - 핵심만 간결하게
-                - 참고 메일을 바탕으로 답변
-                - 링크, URL, 이메일 주소 포함 금지""")
-        else:
-            system_prompt = dedent(f"""\
-                당신은 HD현대미포 선각기술부의 문서 검색 비서입니다.
-                반드시 한국어로 간결하게 답변하세요.
-                
-                질문: {ask_request.query}
-
-                참고 문서:
-                {context_text}
-                
-                답변 규칙:
-                - 한국어로만 답변
-                - 600자 이내로 답변
-                - 불릿 포인트 5개 이내
-                - 핵심만 간결하게
-                - 참고 문서를 바탕으로 답변
-                - 링크, URL, 파일 경로 포함 금지""")
-        
-        # ResourceManager를 통한 LLM 응답 생성
-        resource_manager = pipeline.resource_manager
-        
-        async def gpu_accelerated_stream():
-            try:
-                # LLM 스트리밍 응답
-                response = await resource_manager.generate_llm_response(system_prompt, ask_request.model.value)
-                
-                # 응답을 청크로 나누어 스트리밍
-                chunks = response.split()
-                for i, chunk in enumerate(chunks):
-                    if i == len(chunks) - 1:  # 마지막 청크
-                        yield json.dumps({
-                            "status": "completed",
-                            "content": chunk + " ",
-                            "references": references,
-                            "metadata": {
-                                **metadata,
-                                "request_id": request_id,
-                                "model": request.model.value,
-                                "total_results": len(results)
-                            }
-                        }, ensure_ascii=False)
-                    else:
-                        yield json.dumps({
-                            "status": "streaming", 
-                            "content": chunk + " ",
-                            "references": []
-                        }, ensure_ascii=False)
-                        
-            except Exception as e:
-                logger.error(f"❌ LLM streaming failed: {e}")
-                yield json.dumps({
-                    "status": "error",
-                    "content": "응답 생성 중 오류가 발생했습니다.",
-                    "references": references,
-                    "metadata": metadata
-                }, ensure_ascii=False)
-        
-        return StreamingResponse(gpu_accelerated_stream(), media_type="application/x-ndjson")
-        
-    except Exception as e:
-        logger.error(f"❌ GPU RAG failed: {e}")
-        error_msg = str(e)  # Capture error message in parent scope
-        async def error_stream():
-            yield json.dumps({
-                "status": "error",
-                "content": f"GPU 가속 RAG 처리 중 오류가 발생했습니다: {error_msg}",
-                "references": [],
-                "metadata": {"request_id": request_id, "error": True}
-            }, ensure_ascii=False)
-        return StreamingResponse(error_stream(), media_type="application/x-ndjson")
-
-
-async def ask_legacy(ask_request: AskRequest, request: Request):
-    """레거시 RAG 엔드포인트 (GPU 미사용)"""
-    request_id = ask_request.request_id
-    
     try:
         if not all(k in app_state for k in ["embeddings", "qdrant_clients"]):
             raise HTTPException(status_code=503, detail="서비스가 준비되지 않았습니다.")
+
+        body = await req.json()
+        question = body.get("question", "").strip()
+        model = body.get("model", config.DEFAULT_LLM_MODEL)
+        source = body.get("source", "mail")  # 기본 mail
+
+        if source not in ("mail", "doc"):
+            raise HTTPException(status_code=400, detail="source must be 'mail' or 'doc'")
+
+        if not question:
+            raise HTTPException(status_code=400, detail="질문이 비어있습니다.")
         
-        logger.info(f"[{request_id}] 📨 Legacy Question: {ask_request.query}")
-        logger.info(f"[{request_id}] 📁 Source: {ask_request.source.value}")
+        if any(greet in question for greet in config.GREETINGS):
+            async def greeting_stream():
+                yield json.dumps({"answer_chunk": "안녕하세요! 무엇을 도와드릴까요?", "references": []})
+            return StreamingResponse(greeting_stream(), media_type="application/x-ndjson")
+
+        logger.info(f"[{request_id}] 📨 Original Question: {question}")
+        logger.info(f"[{request_id}] 📁 Source: {source}")
+        logger.info(f"[{request_id}] 🤖 Model: {model}")
         
-        # Try dual routing first, fallback to legacy
-        router = app_state.get("qdrant_router")
-        if router:
-            client = router.get_client(request=request)
-            scope = getattr(request.state, 'scope', 'personal')
-            logger.info(f"[{request_id}] 🎯 Using dual routing - Scope: {scope}")
-        else:
-            # Fallback to legacy routing
-            client = app_state["qdrant_clients"][ask_request.source.value]
-            logger.info(f"[{request_id}] 📍 Using legacy routing - Source: {ask_request.source.value}")
-        context_text, references = search_qdrant(ask_request.query, request_id, client, config, ask_request.source.value, request)
+        client = app_state["qdrant_clients"][source]
+        context_text, references = search_qdrant(question, request_id, client, config, source)
         
         if not context_text:
-            logger.warning(f"[{request_id}] ⚠️ No context found for question: {ask_request.query}")
+            logger.warning(f"[{request_id}] ⚠️ No context found for question: {question}")
         else:
             logger.info(f"[{request_id}] ✅ Context prepared with {len(references)} references")
         
         # source에 따른 메타프롬프트 분리
-        if ask_request.source.value == "mail":
+        if source == "mail":
             final_prompt = dedent(f"""\
                 당신은 HD현대미포 선각기술부의 메일 검색 비서입니다.
                 반드시 한국어로 간결하게 답변하세요.
                 
-                질문: {ask_request.query}
+                질문: {question}
 
                 참고 메일:
                 {context_text or "참고 자료 없음"}
@@ -1667,7 +772,7 @@ async def ask_legacy(ask_request: AskRequest, request: Request):
                 당신은 HD현대미포 선각기술부의 문서 검색 비서입니다.
                 반드시 한국어로 간결하게 답변하세요.
                 
-                질문: {ask_request.query}
+                질문: {question}
 
                 참고 문서:
                 {context_text or "참고 자료 없음"}
@@ -1698,13 +803,13 @@ async def ask_legacy(ask_request: AskRequest, request: Request):
 
         async def response_generator():
             full_answer = ""
-            async for chunk in stream_llm_response(final_prompt, ask_request.model.value, request_id):
+            async for chunk in stream_llm_response(final_prompt, model, request_id):
                 full_answer += chunk
                 yield json.dumps({"answer_chunk": chunk}) + "\n"
             
             yield json.dumps({"references": references}) + "\n"
             
-            # dialog_cache.append((request.query, full_answer))  # Commented out for now
+            dialog_cache.append((question, full_answer))
             
             # LLM 최종 답변 로깅
             if DEBUG_MODE:
@@ -1717,48 +822,16 @@ async def ask_legacy(ask_request: AskRequest, request: Request):
         return StreamingResponse(response_generator(), media_type="application/x-ndjson")
 
     except Exception as e:
-        logger.error(f"[{request_id}] Legacy RAG 엔드포인트에서 오류 발생: {e}", exc_info=True)
+        logger.error(f"[{request_id}] /ask 엔드포인트에서 오류 발생: {e}", exc_info=True)
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail="An internal server error occurred.")
     finally:
-        logger.info(f"--- Legacy RAG REQUEST END: {request_id} ---")
+        logger.info(f"--- RAG REQUEST END: {request_id} ---")
 
 
 # --------------------------------------------------------------------------
-# 6. Qdrant 상태 체크 엔드포인트
-# --------------------------------------------------------------------------
-@app.get("/api/v2/system/qdrant/status")
-async def check_qdrant_status():
-    """Qdrant 서버 상태 확인"""
-    try:
-        from qdrant_client import QdrantClient
-        client = QdrantClient(host="127.0.0.1", port=6333, timeout=5.0)
-        
-        # 컬렉션 목록 가져오기
-        collections = client.get_collections()
-        collection_count = len(collections.collections) if hasattr(collections, 'collections') else 0
-        
-        return {
-            "connected": True,
-            "collections": collection_count,
-            "host": "127.0.0.1",
-            "port": 6333,
-            "status": "online"
-        }
-    except Exception as e:
-        logger.warning(f"Qdrant 연결 실패: {e}")
-        return {
-            "connected": False,
-            "error": str(e),
-            "message": "Qdrant 서버에 연결할 수 없습니다. Qdrant가 실행 중인지 확인하세요.",
-            "host": "127.0.0.1",
-            "port": 6333,
-            "status": "offline"
-        }
-
-# --------------------------------------------------------------------------
-# 7. 서버 실행
+# 6. 서버 실행
 # --------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
