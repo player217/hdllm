@@ -1,0 +1,52 @@
+Return-Path: <complex@test.example.com>
+Delivered-To: multiple@recipients.org
+Received: by mail.server.com with SMTP id xyz789
+	for <multiple@recipients.org>; Wed, 20 Dec 2023 15:45:30 +0900 (KST)
+Date: Wed, 20 Dec 2023 15:45:30 +0900
+From: "김철수 (Kim, Chul-Su)" <complex@test.example.com>
+To: "박영희" <park@company.org>, "이민수" <lee@company.org>
+Cc: "관리자팀" <admin@company.org>, "CEO" <ceo@company.org>
+Bcc: hidden@company.org
+Subject: =?UTF-8?B?W+ykhOq4iF0g7K2R7ZWp7ZiV7KCE6rK97Iqk7YWc+2VHaWwg7KCQ7LeTIOyVjOumrOyalA==?=
+Message-ID: <complex-test-123456@test.example.com>
+In-Reply-To: <previous-message@test.example.com>
+References: <original@test.example.com> <reply1@test.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="----=_NextPart_000_0123_01D9A123.B456C789"
+X-Priority: 1 (Highest)
+X-MSMail-Priority: High
+X-Mailer: Microsoft Outlook 16.0
+
+This is a multi-part message in MIME format.
+
+------=_NextPart_000_0123_01D9A123.B456C789
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+안녕하세요,
+
+이것은 복잡한 이메일 구조를 테스트하기 위한 샘플입니다.
+
+특징:
+- 멀티파트 메시지
+- 복잡한 인코딩된 제목
+- 다중 수신자 (To, Cc, Bcc)
+- 한글과 영어 혼재
+- 특수문자: !@#$%^&*()_+-=[]{}|;':\",./<>?
+- 이모지 테스트: 😊 🎉 ⚠️ ✅ ❌
+
+------=_NextPart_000_0123_01D9A123.B456C789
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+
+<html>
+<body>
+<p>HTML 내용도 포함된 복잡한 구조입니다.</p>
+<ul>
+<li>목록 항목 1</li>
+<li>목록 항목 2</li>
+</ul>
+</body>
+</html>
+
+------=_NextPart_000_0123_01D9A123.B456C789--

@@ -1,0 +1,27 @@
+Return-Path: <sender@example.com>
+Delivered-To: recipient@test.com
+Received: from mail.example.com
+Subject: 테스트 이메일 - 한글 제목
+From: 홍길동 <hong@example.com>
+To: 김철수 <kim@test.com>
+Cc: 박영희 <park@test.com>
+Date: Sat, 14 Sep 2024 15:30:00 +0900
+Message-ID: <test123@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+안녕하세요,
+
+이것은 .eml 파일 처리 테스트를 위한 샘플 이메일입니다.
+
+주요 특징:
+- 한글 제목과 내용 지원
+- 발신자, 수신자, 참조 정보 포함
+- RFC 2822 표준 준수
+
+메일 탭에서 .msg 파일과 동일하게 처리되어야 합니다.
+
+감사합니다.
+
+홍길동 드림

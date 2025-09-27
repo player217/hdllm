@@ -1,0 +1,24 @@
+Return-Path: <admin@company.org>
+Received: from mail.company.org (192.168.1.1) by relay.company.org; 
+	Tue, 16 Jan 2024 14:45:30 +0900
+Date: Tue, 16 Jan 2024 14:45:30 +0900
+From: System Admin <admin@company.org>
+To: all-users@company.org
+Subject: System Maintenance Notice
+Message-ID: <maintenance2024@company.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+
+Dear All,
+
+This is a system maintenance notification.
+
+Maintenance will be performed on:
+- Date: January 20, 2024
+- Time: 2:00 AM - 4:00 AM KST
+- Expected downtime: 2 hours
+
+Please save your work before the maintenance window.
+
+Best regards,
+System Administrator

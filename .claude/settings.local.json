@@ -1,20 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:localhost)",
-      "Bash(powershell:*)",
-      "mcp__playwright__browser_navigate",
-      "mcp__playwright__browser_click",
-      "mcp__playwright__browser_evaluate",
-      "mcp__playwright__browser_type",
-      "mcp__playwright__browser_snapshot",
-      "mcp__playwright__browser_take_screenshot",
-      "Bash(git add:*)",
-      "Bash(git push:*)",
-      "Bash(dir /b C:UserslseunDocumentsLMM_UI_APP)",
-      "mcp__playwright__browser_wait_for",
-      "Bash(git commit:*)",
-      "Bash(git rm:*)"
+      "Bash(venv\\Scripts\\python.exe create_startup_shortcut.py:*)"
     ],
     "deny": [],
     "ask": []

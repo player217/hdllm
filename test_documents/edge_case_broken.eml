@@ -1,0 +1,8 @@
+From: broken@test.com
+BROKEN HEADER WITHOUT COLON
+Subject This is missing a colon
+Date: Invalid-Date-Format
+
+This is a deliberately malformed email to test error handling.
+
+Missing proper structure...

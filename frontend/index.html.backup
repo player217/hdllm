@@ -1253,6 +1253,7 @@
     <div class="toast-container" id="toast-container"></div>
 
     <script>
+(function() {
         // === [수정] 1. 디버그 스위치 및 전역 가드 변수 명확화 ===
         const DEBUG = false; // 필요할 때만 true 로
         function dlog(...args) { if (DEBUG) console.debug('[DEBUG]', ...args); }
@@ -3186,6 +3187,24 @@
             chatManager.saveChats();
             chatManager.stopAutoSave();
         });
+
+        // === GLOBAL FUNCTION EXPOSURES ===
+        // Expose functions that need to be called from HTML inline event handlers
+        window.toggleSidebar = toggleSidebar;
+        window.toggleDarkMode = toggleDarkMode;
+        window.toggleSettings = toggleSettings;
+        window.sendSuggestion = sendSuggestion;
+        window.selectSource = selectSource;
+        window.sendMessage = sendMessage;
+        window.adjustTextareaHeight = adjustTextareaHeight;
+        window.hideQdrantWarning = hideQdrantWarning;
+        window.openReference = openReference;
+        window.saveSettings = saveSettings;
+        
+        // Expose chatManager object for HTML event handlers
+        window.chatManager = chatManager;
+
+})(); // End of IIFE
     </script>
 
     <div id="settings-panel" class="settings-panel">
